@@ -1,0 +1,7 @@
+# Keep LF in the repo and on checkout (gradlew must stay LF to run on macOS/Linux).
+* text=auto eol=lf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.jar binary
+*.png binary
+*.jpg binary

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      Opaque activity (NOT windowIsTranslucent) with a transparent background that shows the wallpaper.
+      Being opaque hides Samsung's SubHomeActivity underneath, so the only thing behind us is the
+      cover wallpaper window, and we become the cover display's wallpaper target.
+    -->
+    <style name="Theme.CoverTest" parent="@android:style/Theme.DeviceDefault.Wallpaper.NoTitleBar">
+        <item name="android:windowShowWallpaper">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowIsTranslucent">false</item>
+        <item name="android:windowLayoutInDisplayCutoutMode">always</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+    </style>
+</resources>

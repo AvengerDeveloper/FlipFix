@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">FlipFix</string>
+    <string name="a11y_description">Keeps your cover screen video showing after you unlock while the phone is folded. FlipFix does not read screen content, and switches this off automatically whenever the phone is open.</string>
+</resources>

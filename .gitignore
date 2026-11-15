@@ -1,0 +1,11 @@
+# Gradle / Android Studio
+.gradle/
+.kotlin/
+build/
+local.properties
+.idea/
+*.iml
+captures/
+
+# Device probe dumps: contain personal app lists, notifications and settings
+probe-output/
