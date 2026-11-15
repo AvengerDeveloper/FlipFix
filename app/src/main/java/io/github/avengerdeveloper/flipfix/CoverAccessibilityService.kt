@@ -1,4 +1,4 @@
-package dev.flipfix
+package io.github.avengerdeveloper.flipfix
 
 import android.accessibilityservice.AccessibilityService
 import android.app.ActivityOptions

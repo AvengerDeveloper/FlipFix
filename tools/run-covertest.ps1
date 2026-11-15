@@ -31,7 +31,7 @@ Read-Host 'Press Enter here when the unlocked cover screen is showing'
 $logcat = Start-Process -FilePath $adb -ArgumentList 'logcat', '-v', 'threadtime' `
     -RedirectStandardOutput $logFile -NoNewWindow -PassThru
 
-$amArgs = @('shell', 'am', 'start', '--display', '1', '-n', 'dev.flipfix.covertest/.CoverTestActivity')
+$amArgs = @('shell', 'am', 'start', '--display', '1', '-n', 'io.github.avengerdeveloper.flipfix.covertest/.CoverTestActivity')
 if ($videoPath) { $amArgs += @('--es', 'videoPath', $videoPath) }
 Say 'Launching the test on the cover screen...'
 & $adb @amArgs

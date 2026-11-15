@@ -1,4 +1,4 @@
-package dev.flipfix.covertest
+package io.github.avengerdeveloper.flipfix.covertest
 
 import android.app.Activity
 import android.app.WallpaperManager

@@ -1,4 +1,4 @@
-package dev.flipfix
+package io.github.avengerdeveloper.flipfix
 
 import android.content.BroadcastReceiver
 import android.content.Context

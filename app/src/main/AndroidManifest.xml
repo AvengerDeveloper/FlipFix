@@ -5,7 +5,7 @@
     <!--
       Lets FlipFix switch its own accessibility service on only while the phone is folded,
       so banking apps on the main screen never see it. Granted once from a PC:
-        adb shell pm grant dev.flipfix android.permission.WRITE_SECURE_SETTINGS
+        adb shell pm grant io.github.avengerdeveloper.flipfix android.permission.WRITE_SECURE_SETTINGS
     -->
     <uses-permission
         android:name="android.permission.WRITE_SECURE_SETTINGS"
@@ -36,7 +36,7 @@
             android:exported="false"
             android:launchMode="singleTask"
             android:resizeableActivity="true"
-            android:taskAffinity="dev.flipfix.cover"
+            android:taskAffinity="io.github.avengerdeveloper.flipfix.cover"
             android:theme="@style/Theme.FlipFix.Cover" />
 
         <service

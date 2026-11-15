@@ -3,11 +3,11 @@ plugins {
 }
 
 android {
-    namespace = "dev.flipfix"
+    namespace = "io.github.avengerdeveloper.flipfix"
     compileSdk = 37
 
     defaultConfig {
-        applicationId = "dev.flipfix"
+        applicationId = "io.github.avengerdeveloper.flipfix"
         minSdk = 33
         targetSdk = 37
         versionCode = 1
