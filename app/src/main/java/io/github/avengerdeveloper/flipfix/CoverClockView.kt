@@ -25,6 +25,12 @@ class CoverClockView @JvmOverloads constructor(
 
     private var style = CoverClockStyle.load()
 
+    /**
+     * True (default): pinned to the cover display, wherever the view sits. False: lays out in its own
+     * bounds, for the edge-peek card that represents the whole cover while it slides and scales.
+     */
+    var screenAnchored = true
+
     private val timePaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.SUBPIXEL_TEXT_FLAG).apply {
         typeface = CoverClockStyle.timeTypeface(context)
         letterSpacing = CoverClockStyle.TIME_LETTER_SPACING
@@ -72,12 +78,25 @@ class CoverClockView @JvmOverloads constructor(
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         // Full cover-display size: the layout is defined in display coordinates, not view coordinates.
-        val windowBounds = context.getSystemService(WindowManager::class.java)?.currentWindowMetrics?.bounds
-        val screenW = (windowBounds?.width() ?: width).toFloat()
-        val screenH = (windowBounds?.height() ?: height).toFloat()
-        getLocationOnScreen(location)
-        val offX = location[0].toFloat()
-        val offY = location[1].toFloat()
+        val screenW: Float
+        val screenH: Float
+        val offX: Float
+        val offY: Float
+        if (screenAnchored) {
+            val windowBounds = context.getSystemService(WindowManager::class.java)?.currentWindowMetrics?.bounds
+            screenW = (windowBounds?.width() ?: width).toFloat()
+            screenH = (windowBounds?.height() ?: height).toFloat()
+            getLocationOnScreen(location)
+            offX = location[0].toFloat()
+            offY = location[1].toFloat()
+        } else {
+            // Drawn inside a moving/scaled card that represents the whole cover: lay out in the view's own
+            // coordinates so the clock moves and scales with the card.
+            screenW = width.toFloat()
+            screenH = height.toFloat()
+            offX = 0f
+            offY = 0f
+        }
 
         val digitH = style.digitHeightFrac * screenH
         timePaint.textSize = digitH * CoverClockStyle.TIME_SIZE_PER_DIGIT_HEIGHT

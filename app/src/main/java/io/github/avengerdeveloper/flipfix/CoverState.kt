@@ -39,6 +39,24 @@ object CoverState {
     fun observeNotificationIcons(observer: () -> Unit) = notificationObservers.add(observer)
     fun stopObservingNotificationIcons(observer: () -> Unit) = notificationObservers.remove(observer)
 
+    /**
+     * Set by the accessibility service: plays the "slide away" card animation for the cover face and calls
+     * the given callback once the card covers the screen (so the face can step aside underneath it).
+     * Null when the service isn't running; the face then steps aside without the animation.
+     */
+    @Volatile var exitAnimator: ((onCovered: () -> Unit) -> Unit)? = null
+
+    private val faceShownOnce = CopyOnWriteArraySet<() -> Unit>()
+
+    /** Run [action] the next time the cover face has drawn a frame (used for the edge-peek handover). */
+    fun onFaceShownOnce(action: () -> Unit) = faceShownOnce.add(action)
+
+    fun notifyFaceShown() {
+        val actions = faceShownOnce.toList()
+        faceShownOnce.clear()
+        actions.forEach { it() }
+    }
+
     /** The live cover face, if any (it stays alive in the background between uses). */
     @Volatile var coverActivity: WeakReference<Activity>? = null
 

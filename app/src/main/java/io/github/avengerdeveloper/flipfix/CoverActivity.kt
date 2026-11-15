@@ -9,6 +9,7 @@ import android.util.Log
 import android.view.Display
 import android.view.GestureDetector
 import android.view.MotionEvent
+import android.view.View
 import android.view.WindowInsets
 import android.view.WindowInsetsController
 import java.lang.ref.WeakReference
@@ -57,6 +58,12 @@ class CoverActivity : Activity() {
             return
         }
         CoverState.showing = true
+        // Undo the slide-out from the last dismissal: FlipFix comes back in place, exactly where the edge
+        // peek (or Samsung's lock screen) left the face.
+        findViewById<View>(R.id.root).animate().cancel()
+        findViewById<View>(R.id.root).apply { translationX = 0f; alpha = 1f }
+        // Tell the edge peek once this face is really on screen, so its card can fade out on top of it.
+        window.decorView.viewTreeObserver.registerFrameCommitCallback { CoverState.notifyFaceShown() }
         hideNavigationBar()
         clock.invalidate()
         clock.reloadStyleAsync()
@@ -116,8 +123,15 @@ class CoverActivity : Activity() {
 
     private fun dismiss() {
         CoverState.dismissed = true
-        // Step aside (Samsung's widgets come forward) but stay alive for a quick swipe back.
-        moveTaskToBack(true)
+        // The accessibility service snapshots this face into a card that covers the screen, then we step
+        // aside underneath it and the card shrinks away to the left, revealing Samsung's widgets (the
+        // reverse of the edge peek). FlipFix stays alive for a quick swipe back.
+        val exit = CoverState.exitAnimator
+        if (exit == null) {
+            moveTaskToBack(true)
+        } else {
+            exit { moveTaskToBack(true) }
+        }
     }
 
     private fun openWallet() {

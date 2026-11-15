@@ -43,8 +43,10 @@ class FlipNotificationListener : NotificationListenerService() {
     private val screenReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             if (intent.action == Intent.ACTION_SCREEN_OFF) {
-                // A banking-app pause lasts until the screen turns off.
+                // A banking-app pause and a "swiped to widgets" dismissal last until the screen turns off.
+                // Cleared here because this listener always runs (the accessibility service may be off).
                 CoverState.suspendedFor = null
+                CoverState.dismissed = false
                 BankGuard.onScreenOff()
             }
             applyFoldRule(intent.action?.substringAfterLast('.') ?: "broadcast")
@@ -133,6 +135,7 @@ class FlipNotificationListener : NotificationListenerService() {
             !CoverState.isEnabled(this) -> AccessibilityToggle.set(this, false, "FlipFix switched off")
             mainOn -> {
                 CoverState.suspendedFor = null
+                CoverState.dismissed = false
                 AccessibilityToggle.set(this, false, "main screen on ($reason)")
             }
             CoverState.suspendedFor != null -> AccessibilityToggle.set(this, false, "paused for ${CoverState.suspendedFor}")
