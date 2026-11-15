@@ -9,4 +9,10 @@
         android:id="@+id/clock"
         android:layout_width="match_parent"
         android:layout_height="match_parent" />
+
+    <!-- Notification icons (top-left) and battery pill (top-right); see CoverStatusView. -->
+    <io.github.avengerdeveloper.flipfix.CoverStatusView
+        android:id="@+id/status"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
 </FrameLayout>

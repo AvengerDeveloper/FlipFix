@@ -10,8 +10,8 @@ flat grey widget grid.
 FlipFix brings the old flow back. No root, no Shizuku, and it uses **Samsung's own video engine**, so what
 you see is exactly the video you set in Wallpaper & style.
 
-> Status: early but working daily on a Z Flip6 (One UI 9.0). The cover clock matches Samsung's horizontal
-> cover clock to within a pixel; battery and notification icons are next.
+> Status: early but working daily on a Z Flip6 (One UI 9.0). The clock, notification icons and battery pill
+> match Samsung's cover lock screen to within a pixel or two.
 
 ## What you get
 
@@ -19,6 +19,7 @@ you see is exactly the video you set in Wallpaper & style.
 |---|---|
 | Your cover video keeps playing | FlipFix takes over within a frame of the unlock |
 | Your clock stays exactly where it was | Same font, size and position as Samsung's lock screen |
+| Notification icons and battery | Samsung-style icons top-left; battery pill top-right with the protection shield |
 | Swipe left (or right) | Samsung's widgets, as before |
 | Swipe right from the left edge on the widgets | Back to your video |
 | Swipe up | Samsung Wallet |
@@ -100,7 +101,7 @@ screen is built on your firmware. None of the tools change anything on the phone
 ## Roadmap
 
 - Other Samsung clock styles (stacked, other fonts); the horizontal style is matched today
-- Battery and notification icons on the cover face
+- Confirm the charging icon in the battery pill (only battery protection has been seen so far)
 - Ask once, then auto-pause, for banking apps opened on the cover screen; Quick Settings tile
 - Pre-built APKs on GitHub Releases
 

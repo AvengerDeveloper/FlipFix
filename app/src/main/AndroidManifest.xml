@@ -15,6 +15,10 @@
         <package android:name="com.samsung.android.spay" />
         <!-- Samsung's AOD app holds the cover clock fonts; FlipFix loads them from there at runtime. -->
         <package android:name="com.samsung.android.app.aodservice" />
+        <!-- Lets FlipFix load the small notification icons of the apps that post notifications. -->
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+        </intent>
     </queries>
 
     <application

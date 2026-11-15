@@ -8,7 +8,9 @@ import android.hardware.display.DisplayManager
 import android.os.Handler
 import android.os.Looper
 import android.os.PowerManager
+import android.app.NotificationManager
 import android.service.notification.NotificationListenerService
+import android.service.notification.StatusBarNotification
 import android.util.Log
 import android.view.Display
 
@@ -22,7 +24,7 @@ import android.view.Display
  * Samsung hides the cover display from ordinary apps, so waking the cover screen produces no display
  * callback here; SCREEN_ON/OFF broadcasts are what trigger a re-check in that case.
  *
- * Later it will also feed notification icons to the cover face.
+ * It also publishes the notification icons shown at the top-left of the cover face.
  */
 class FlipNotificationListener : NotificationListenerService() {
 
@@ -57,6 +59,32 @@ class FlipNotificationListener : NotificationListenerService() {
         // Protected system broadcasts; EXPORTED is required for them to be delivered reliably.
         registerReceiver(screenReceiver, filter, RECEIVER_EXPORTED)
         applyFoldRule("listener connected")
+        publishIcons()
+    }
+
+    override fun onNotificationPosted(sbn: StatusBarNotification?, rankingMap: RankingMap?) = publishIcons()
+    override fun onNotificationRemoved(sbn: StatusBarNotification?, rankingMap: RankingMap?) = publishIcons()
+    override fun onNotificationRankingUpdate(rankingMap: RankingMap?) = publishIcons()
+
+    /**
+     * Mirrors Samsung's cover icons (checked on One UI 9): one icon per app, newest first, skipping
+     * notifications with "min" importance (e.g. the ongoing "Battery protection" notification).
+     */
+    private fun publishIcons() {
+        val active = runCatching { activeNotifications }.getOrNull() ?: return
+        val ranking = currentRanking
+        val r = Ranking()
+        val icons = active
+            .filter { sbn ->
+                sbn.packageName != packageName &&
+                    sbn.notification.smallIcon != null &&
+                    (!ranking.getRanking(sbn.key, r) || r.importance >= NotificationManager.IMPORTANCE_LOW)
+            }
+            .groupBy { it.packageName }
+            .map { (_, list) -> list.maxBy { it.postTime } }
+            .sortedByDescending { it.postTime }
+            .map { CoverState.NotificationIcon(it.packageName, it.notification.smallIcon) }
+        CoverState.publishNotificationIcons(icons)
     }
 
     override fun onListenerDisconnected() {

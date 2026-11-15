@@ -2,7 +2,9 @@ package io.github.avengerdeveloper.flipfix
 
 import android.app.Activity
 import android.content.Context
+import android.graphics.drawable.Icon
 import java.lang.ref.WeakReference
+import java.util.concurrent.CopyOnWriteArraySet
 import android.hardware.display.DisplayManager
 import android.os.PowerManager
 import android.view.Display
@@ -14,6 +16,22 @@ object CoverState {
 
     /** Set when the user swipes FlipFix away to reach Samsung's widgets; cleared when the screen turns off. */
     @Volatile var dismissed = false
+
+    /** One icon per app with a notification, newest first (what Samsung's cover shows top-left). */
+    data class NotificationIcon(val packageName: String, val icon: Icon)
+
+    @Volatile var notificationIcons: List<NotificationIcon> = emptyList()
+        private set
+    private val notificationObservers = CopyOnWriteArraySet<() -> Unit>()
+
+    fun publishNotificationIcons(icons: List<NotificationIcon>) {
+        if (icons == notificationIcons) return
+        notificationIcons = icons
+        notificationObservers.forEach { it() }
+    }
+
+    fun observeNotificationIcons(observer: () -> Unit) = notificationObservers.add(observer)
+    fun stopObservingNotificationIcons(observer: () -> Unit) = notificationObservers.remove(observer)
 
     /** The live cover face, if any (it stays alive in the background between uses). */
     @Volatile var coverActivity: WeakReference<Activity>? = null
