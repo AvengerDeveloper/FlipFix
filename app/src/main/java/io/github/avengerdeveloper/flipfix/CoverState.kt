@@ -17,6 +17,12 @@ object CoverState {
     /** Set when the user swipes FlipFix away to reach Samsung's widgets; cleared when the screen turns off. */
     @Volatile var dismissed = false
 
+    /**
+     * Package of a banking app FlipFix paused itself for (see BankGuard). While set, the fold rule keeps
+     * the accessibility service off; cleared when the screen turns off or the phone is opened.
+     */
+    @Volatile var suspendedFor: String? = null
+
     /** One icon per app with a notification, newest first (what Samsung's cover shows top-left). */
     data class NotificationIcon(val packageName: String, val icon: Icon)
 

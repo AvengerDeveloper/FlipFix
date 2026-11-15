@@ -54,6 +54,11 @@ Many banking apps refuse to run while any accessibility service is on. So FlipFi
 only while the cover screen is on** and **off the moment you open the phone**. Banking apps on the main
 screen never see it. This switching needs a one-time permission granted from a PC (below).
 
+One UI 9 doesn't let banking apps run on the cover screen at all (checked with two banks), so this already
+covers them. For any app that does open on the cover and complains, tick it under **Choose banking apps…**
+in the FlipFix app: FlipFix then switches itself off while that app is open. FlipFix also asks once when an
+app's name looks financial. A **Quick Settings tile** switches FlipFix on or off at any time.
+
 ## Requirements
 
 - Galaxy Z Flip on **One UI 9** (tested: Z Flip6 `SM-F741B`, One UI 9.0 / Android 17). Flip 5 / 7 / 8 should
@@ -102,7 +107,6 @@ screen is built on your firmware. None of the tools change anything on the phone
 ## Roadmap
 
 - Other Samsung clock styles (stacked, other fonts); the horizontal style is matched today
-- Ask once, then auto-pause, for banking apps opened on the cover screen; Quick Settings tile
 - Pre-built APKs on GitHub Releases
 
 ## Disclaimer

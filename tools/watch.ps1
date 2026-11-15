@@ -11,5 +11,5 @@ New-Item -ItemType Directory -Force $outRoot | Out-Null
 
 & $adb logcat -c
 # logcat -e matches the message text only (not the tag), so match FlipFix's own messages explicitly.
-& $adb logcat -v time -e 'fold rule|accessibility service|launched cover face|edge strip|opened on cover|media pill|cover icons|not launching|launch failed|sent resume|resume failed|Wallet not installed|could not open Wallet|opened Wallet|samsung\.android\.wallpaper\.(pause|resume)|ImageWallpaper_17\[VideoController\]: (play|pause)$|accessibilityservice.*flipfix|AccessibilityManagerService.*flipfix' |
+& $adb logcat -v time -e 'fold rule|accessibility service|launched cover face|edge strip|opened on cover|media pill|cover icons|bank guard|paused for|asked about|switched off|not launching|launch failed|sent resume|resume failed|Wallet not installed|could not open Wallet|opened Wallet|samsung\.android\.wallpaper\.(pause|resume)|ImageWallpaper_17\[VideoController\]: (play|pause)$|accessibilityservice.*flipfix|AccessibilityManagerService.*flipfix' |
     Tee-Object -FilePath (Join-Path $outRoot 'watch-logcat.txt')

@@ -115,9 +115,13 @@ class CoverAccessibilityService : AccessibilityService() {
                 startUnlockPoll()
             }
             isSubHome -> maybeLaunch("Samsung cover home shown")
-            isAppScreen && edgeView != null -> {
-                Log.d(CoverState.TAG, "hiding edge strip: $pkg / $cls opened on cover")
-                hideEdge()
+            isAppScreen -> {
+                if (edgeView != null) {
+                    Log.d(CoverState.TAG, "hiding edge strip: $pkg / $cls opened on cover")
+                    hideEdge()
+                }
+                // Banking apps opened on the cover: pause FlipFix (or ask once). See BankGuard.
+                if (pkg != null) BankGuard.onAppOpenedOnCover(this, pkg)
             }
         }
     }
