@@ -1,0 +1,107 @@
+# FlipFix
+
+**Keep your Galaxy Z Flip cover-screen video playing after you unlock — the way it worked before One UI 9.**
+
+For four years the Flip cover screen worked the same way: the wallpaper or video you set *was* the cover
+screen. Swipe for widgets, down for notifications, up for Samsung Wallet. One UI 9 changed that: the cover
+video is now only a lock screen. The moment you unlock, Samsung pauses it and covers it with Now Brief or a
+flat grey widget grid.
+
+FlipFix brings the old flow back. No root, no Shizuku, and it uses **Samsung's own video engine**, so what
+you see is exactly the video you set in Wallpaper & style.
+
+> Status: early but working daily on a Z Flip6 (One UI 9.0). The cover clock is a placeholder for now.
+
+## What you get
+
+| On the cover screen, after unlocking while folded | |
+|---|---|
+| Your cover video keeps playing | FlipFix takes over within a frame of the unlock |
+| Swipe left (or right) | Samsung's widgets, as before |
+| Swipe right from the left edge on the widgets | Back to your video |
+| Swipe up | Samsung Wallet |
+| Swipe down from the top edge | Samsung's own notification panel (FlipFix doesn't intercept it) |
+| Open the phone | FlipFix switches its accessibility service off |
+
+## How it works
+
+Samsung never actually removes the cover video on unlock. The video wallpaper keeps running on the cover
+display; Samsung's cover launcher sends it a `samsung.android.wallpaper.pause` command and draws its widget
+UI on top. FlipFix:
+
+1. opens a transparent screen on the cover display right after you unlock, which makes it the window
+   showing the cover wallpaper, and
+2. sends the matching `samsung.android.wallpaper.resume` command, so Samsung's player keeps going.
+
+The full investigation is in [`research/`](research/).
+
+### Why an accessibility service, and why it turns itself off
+
+Android only lets an app open a screen from the background in a few cases; an accessibility service is one of
+them. FlipFix's service listens only for "which window is on top" changes. It **never reads screen content**,
+and FlipFix has **no internet permission**.
+
+Many banking apps refuse to run while any accessibility service is on. So FlipFix switches its service **on
+only while the cover screen is on** and **off the moment you open the phone**. Banking apps on the main
+screen never see it. This switching needs a one-time permission granted from a PC (below).
+
+## Requirements
+
+- Galaxy Z Flip on **One UI 9** (tested: Z Flip6 `SM-F741B`, One UI 9.0 / Android 17). Flip 5 / 7 / 8 should
+  behave the same; reports welcome.
+- A PC with [Android SDK Platform-Tools](https://developer.android.com/tools/releases/platform-tools)
+  (`adb`) for the one-time setup, and Android Studio or a JDK to build.
+
+## Install
+
+1. On the phone: **Settings → About phone → Software information**, tap **Build number** 7 times, then
+   **Settings → Developer options → USB debugging** on. Connect the USB cable and allow the prompt.
+2. Build and install:
+   ```bash
+   ./gradlew :app:installDebug
+   ```
+3. Grant the two permissions (one time):
+   ```bash
+   adb shell pm grant io.github.avengerdeveloper.flipfix android.permission.WRITE_SECURE_SETTINGS
+   adb shell cmd notification allow_listener io.github.avengerdeveloper.flipfix/io.github.avengerdeveloper.flipfix.FlipNotificationListener
+   ```
+   (Notification access can also be given in **Settings → Notifications → Device & app notifications**.)
+4. Fold the phone, unlock — your video stays.
+
+There is no need to turn the accessibility service on by hand; FlipFix manages it. Open the FlipFix app on
+the main screen to check status or switch it off.
+
+> Installing with `adb` avoids Android's "restricted settings" block, which applies to apps sideloaded from
+> a browser or file manager.
+
+## Troubleshooting
+
+`tools/watch.ps1` (Windows PowerShell) streams FlipFix's log plus Samsung's video commands while you fold,
+unlock and swipe. `tools/probe.ps1` and `tools/capture-unlock.ps1` take read-only snapshots of how the cover
+screen is built on your firmware. None of the tools change anything on the phone.
+
+## Project layout
+
+| Path | What |
+|---|---|
+| `app/` | The FlipFix app |
+| `covertest/` | The feasibility probe that proved the approach |
+| `tools/` | Read-only ADB probes and the log watcher |
+| `research/` | Community research and on-device findings for One UI 9 |
+
+## Roadmap
+
+- Cover clock that matches your Samsung clock style (position, size, colour, font)
+- Battery and notification icons on the cover face
+- Ask once, then auto-pause, for banking apps opened on the cover screen; Quick Settings tile
+- Pre-built APKs on GitHub Releases
+
+## Disclaimer
+
+FlipFix is an independent project, not affiliated with or endorsed by Samsung. Galaxy, One UI and Samsung
+Wallet are trademarks of Samsung Electronics. It relies on undocumented One UI behaviour that a future
+update may change.
+
+## Licence
+
+[MIT](LICENSE)
