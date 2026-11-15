@@ -1,33 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Placeholder face: the clock will later be matched to Samsung's cover_clock.png. -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/root"
     android:layout_width="match_parent"
     android:layout_height="match_parent">
 
-    <LinearLayout
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_gravity="center"
-        android:gravity="center_horizontal"
-        android:orientation="vertical">
-
-        <TextClock
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:shadowColor="#66000000"
-            android:shadowRadius="6"
-            android:textColor="#FFFFFF"
-            android:textSize="56sp" />
-
-        <TextClock
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:format12Hour="EEE d MMMM"
-            android:format24Hour="EEE d MMMM"
-            android:shadowColor="#66000000"
-            android:shadowRadius="6"
-            android:textColor="#FFFFFF"
-            android:textSize="16sp" />
-    </LinearLayout>
+    <!-- Matches Samsung's cover lock-screen clock line; see CoverClockStyle. -->
+    <io.github.avengerdeveloper.flipfix.CoverClockView
+        android:id="@+id/clock"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
 </FrameLayout>

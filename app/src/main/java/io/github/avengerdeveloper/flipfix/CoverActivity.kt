@@ -9,6 +9,8 @@ import android.util.Log
 import android.view.Display
 import android.view.GestureDetector
 import android.view.MotionEvent
+import android.view.WindowInsets
+import android.view.WindowInsetsController
 import java.lang.ref.WeakReference
 import kotlin.math.abs
 
@@ -22,6 +24,7 @@ import kotlin.math.abs
 class CoverActivity : Activity() {
 
     private lateinit var gestures: GestureDetector
+    private lateinit var clock: CoverClockView
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -31,8 +34,19 @@ class CoverActivity : Activity() {
             return
         }
         setContentView(R.layout.activity_cover)
+        clock = findViewById(R.id.clock)
         gestures = GestureDetector(this, FlingListener())
         CoverState.coverActivity = WeakReference(this)
+        hideNavigationBar()
+    }
+
+    /** Samsung shows a navigation bar (back/home/recents) over cover apps; the cover face has none. */
+    private fun hideNavigationBar() {
+        window.setDecorFitsSystemWindows(false)
+        window.insetsController?.apply {
+            hide(WindowInsets.Type.navigationBars())
+            systemBarsBehavior = WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        }
     }
 
     override fun onResume() {
@@ -43,6 +57,9 @@ class CoverActivity : Activity() {
             return
         }
         CoverState.showing = true
+        hideNavigationBar()
+        clock.invalidate()
+        clock.reloadStyleAsync()
         window.decorView.post { resumeVideo("resumed") }
         // Samsung sends its own pause at unlock; if we were already on top, ours may land first.
         // Re-send shortly after so the last word is always "resume".

@@ -13,6 +13,8 @@
 
     <queries>
         <package android:name="com.samsung.android.spay" />
+        <!-- Samsung's AOD app holds the cover clock fonts; FlipFix loads them from there at runtime. -->
+        <package android:name="com.samsung.android.app.aodservice" />
     </queries>
 
     <application

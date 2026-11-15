@@ -10,13 +10,15 @@ flat grey widget grid.
 FlipFix brings the old flow back. No root, no Shizuku, and it uses **Samsung's own video engine**, so what
 you see is exactly the video you set in Wallpaper & style.
 
-> Status: early but working daily on a Z Flip6 (One UI 9.0). The cover clock is a placeholder for now.
+> Status: early but working daily on a Z Flip6 (One UI 9.0). The cover clock matches Samsung's horizontal
+> cover clock to within a pixel; battery and notification icons are next.
 
 ## What you get
 
 | On the cover screen, after unlocking while folded | |
 |---|---|
 | Your cover video keeps playing | FlipFix takes over within a frame of the unlock |
+| Your clock stays exactly where it was | Same font, size and position as Samsung's lock screen |
 | Swipe left (or right) | Samsung's widgets, as before |
 | Swipe right from the left edge on the widgets | Back to your video |
 | Swipe up | Samsung Wallet |
@@ -32,6 +34,11 @@ UI on top. FlipFix:
 1. opens a transparent screen on the cover display right after you unlock, which makes it the window
    showing the cover wallpaper, and
 2. sends the matching `samsung.android.wallpaper.resume` command, so Samsung's player keeps going.
+
+The clock is drawn to match Samsung's: Wallpaper & style leaves a rendered template of your cover face
+(`cover_clock.png`) next to the cover video, which gives the clock's position, size and colour, and the
+digits use Samsung's own clock font, loaded at runtime from Samsung's AOD app (FlipFix does not ship any
+Samsung fonts).
 
 The full investigation is in [`research/`](research/).
 
@@ -77,7 +84,8 @@ the main screen to check status or switch it off.
 ## Troubleshooting
 
 `tools/watch.ps1` (Windows PowerShell) streams FlipFix's log plus Samsung's video commands while you fold,
-unlock and swipe. `tools/probe.ps1` and `tools/capture-unlock.ps1` take read-only snapshots of how the cover
+unlock and swipe. `tools/cover-shot.ps1` takes cover-screen screenshots (Samsung locked, then FlipFix
+unlocked) for side-by-side comparison. `tools/probe.ps1` and `tools/capture-unlock.ps1` take read-only snapshots of how the cover
 screen is built on your firmware. None of the tools change anything on the phone.
 
 ## Project layout
@@ -91,7 +99,7 @@ screen is built on your firmware. None of the tools change anything on the phone
 
 ## Roadmap
 
-- Cover clock that matches your Samsung clock style (position, size, colour, font)
+- Other Samsung clock styles (stacked, other fonts); the horizontal style is matched today
 - Battery and notification icons on the cover face
 - Ask once, then auto-pause, for banking apps opened on the cover screen; Quick Settings tile
 - Pre-built APKs on GitHub Releases
