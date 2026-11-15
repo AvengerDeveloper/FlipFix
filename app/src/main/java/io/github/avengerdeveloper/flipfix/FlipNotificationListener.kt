@@ -93,10 +93,17 @@ class FlipNotificationListener : NotificationListenerService() {
         CoverState.publishNotificationIcons(icons)
     }
 
-    private fun isMedia(n: Notification): Boolean =
-        n.extras.containsKey(Notification.EXTRA_MEDIA_SESSION) ||
+    /**
+     * Media players, plus Samsung's Now bar entries (e.g. SystemUI's "MediaOngoingActivity" mirror of the
+     * playing track, "..._nowbar_ongoing_channel"): Samsung shows these in its Now bar, never as icons.
+     */
+    private fun isMedia(n: Notification): Boolean {
+        val channel = n.channelId.orEmpty().lowercase()
+        return n.extras.containsKey(Notification.EXTRA_MEDIA_SESSION) ||
             n.category == Notification.CATEGORY_TRANSPORT ||
-            n.extras.getString(Notification.EXTRA_TEMPLATE)?.contains("MediaStyle") == true
+            n.extras.getString(Notification.EXTRA_TEMPLATE)?.contains("MediaStyle") == true ||
+            "ongoingactivity" in channel || "nowbar" in channel
+    }
 
     override fun onListenerDisconnected() {
         if (::displayManager.isInitialized) {

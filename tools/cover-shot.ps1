@@ -34,6 +34,9 @@ $prompts = @{
     'flipfix-unlocked'          = 'Now unlock with your fingerprint (stay folded) so FlipFix shows.'
     'charging-samsung-locked'   = 'Plugged in and CHARGING. Fold, press the side key: cover LOCK screen. Do NOT unlock.'
     'charging-flipfix-unlocked' = 'Still charging: unlock with your fingerprint (stay folded) so FlipFix shows.'
+    'media-samsung-locked'      = 'Music PLAYING. Fold, press the side key: cover LOCK screen with the music pill. Do NOT unlock.'
+    'media-samsung-paused'      = 'Tap PAUSE on the music pill (still locked), then wait a moment.'
+    'media-flipfix-unlocked'    = 'Tap PLAY again, then unlock with your fingerprint (stay folded) so FlipFix shows.'
 }
 
 # Battery state at the moment of each shot (status: 2 = charging, 4 = plugged but not charging, 5 = full).

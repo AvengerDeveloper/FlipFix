@@ -15,4 +15,10 @@
         android:id="@+id/status"
         android:layout_width="match_parent"
         android:layout_height="match_parent" />
+
+    <!-- Music pill (bottom-left) with working controls; see CoverMediaView. -->
+    <io.github.avengerdeveloper.flipfix.CoverMediaView
+        android:id="@+id/media"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
 </FrameLayout>

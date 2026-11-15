@@ -85,8 +85,22 @@ class CoverActivity : Activity() {
     // Not finished on stop: staying alive in the background on the cover display makes the next
     // return (after unlock, or swiping back from the widgets) much faster than creating it again.
 
+    /** Set by the fling listener when a swipe was recognised and acted on. */
+    private var flingHandled = false
+
+    /**
+     * Every touch feeds the swipe detector and also reaches the views (so the music pill's buttons get
+     * taps). When a swipe is acted on, the views get a cancel instead of the end of the gesture.
+     */
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
-        if (::gestures.isInitialized && gestures.onTouchEvent(ev)) return true
+        if (::gestures.isInitialized) gestures.onTouchEvent(ev)
+        if (flingHandled) {
+            flingHandled = false
+            val cancel = MotionEvent.obtain(ev).apply { action = MotionEvent.ACTION_CANCEL }
+            super.dispatchTouchEvent(cancel)
+            cancel.recycle()
+            return true
+        }
         return super.dispatchTouchEvent(ev)
     }
 
@@ -129,8 +143,8 @@ class CoverActivity : Activity() {
             val dy = e2.y - start.y
             val minDistance = resources.displayMetrics.density * MIN_SWIPE_DP
             return when {
-                abs(dx) > abs(dy) && abs(dx) > minDistance -> { dismiss(); true }
-                dy < 0 && abs(dy) > abs(dx) && abs(dy) > minDistance -> { openWallet(); true }
+                abs(dx) > abs(dy) && abs(dx) > minDistance -> { flingHandled = true; dismiss(); true }
+                dy < 0 && abs(dy) > abs(dx) && abs(dy) > minDistance -> { flingHandled = true; openWallet(); true }
                 else -> false
             }
         }
