@@ -21,8 +21,8 @@ you see is exactly the video you set in Wallpaper & style.
 | Your clock stays exactly where it was | Same font, size and position as Samsung's lock screen |
 | Notification icons and battery | Samsung-style icons top-left; battery pill top-right with the charging bolt or protection shield |
 | Music pill | Samsung's Now bar player: artwork, scrolling title, working previous / play-pause / next |
-| Swipe left (or right) | Samsung's widgets, as before |
-| Swipe right from the left edge on the widgets | Back to your video |
+| Swipe left (or right) | Samsung's widgets, as before; the cover face shrinks away as a card that follows your finger |
+| Swipe right from the left edge on the widgets | Back to your video, with the card sliding back in |
 | Swipe up | Samsung Wallet |
 | Swipe down from the top edge | Samsung's own notification panel (FlipFix doesn't intercept it) |
 | Open the phone | FlipFix switches its accessibility service off |

@@ -6,6 +6,8 @@ import android.animation.ValueAnimator
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Color
+import android.graphics.ColorMatrix
+import android.graphics.ColorMatrixColorFilter
 import android.graphics.Outline
 import android.graphics.Path
 import android.graphics.PixelFormat
@@ -136,8 +138,11 @@ class EdgeReturn(
 
     // ---- Card ----
 
-    /** Grow the overlay to full screen and put a scrim plus a card (holding [content]) in it. */
-    private fun buildCard(content: List<View>): FrameLayout? {
+    /**
+     * Grow the overlay to full screen and put an optional [background], a scrim and a card (holding
+     * [content]) in it.
+     */
+    private fun buildCard(content: List<View>, background: View? = null): FrameLayout? {
         val view = root ?: return null
         val lp = params ?: return null
         lp.width = WindowManager.LayoutParams.MATCH_PARENT
@@ -145,6 +150,7 @@ class EdgeReturn(
         view.removeAllViews()
         view.alpha = 1f
         val ctx = view.context
+        background?.let { view.addView(it, FrameLayout.LayoutParams(-1, -1)) }
         scrim = View(ctx).apply { setBackgroundColor(Color.BLACK); alpha = 0f }
         val c = FrameLayout(ctx).apply {
             content.forEach { addView(it, FrameLayout.LayoutParams(-1, -1)) }
@@ -192,6 +198,170 @@ class EdgeReturn(
     /** Snapshot of FlipFix's face taken at the moment it was swiped away; reused for the way back. */
     private var faceSnapshot: Bitmap? = null
 
+    // ---- Swiping FlipFix away, following the finger ----
+
+    /** Called when a swipe-away has finished and Samsung's widgets are showing (to refresh the capture). */
+    var onExitFinished: (() -> Unit)? = null
+
+    private var preparedFace: Bitmap? = null
+    private var preparedAt = 0L
+
+    /** Just the idle edge strip on screen (no card, no animation): safe to capture the widgets. */
+    val isIdleStrip get() = root != null && card == null && exitState == ExitState.IDLE && !awaitingFace
+
+    /** A face snapshot taken moments ago (when the finger went down on FlipFix), if still fresh. */
+    fun freshFace(): Bitmap? = preparedFace?.takeIf { SystemClock.uptimeMillis() - preparedAt < FACE_FRESH_MS }
+
+    fun offerFaceSnapshot(bitmap: Bitmap) {
+        preparedFace = bitmap
+        preparedAt = SystemClock.uptimeMillis()
+        if (exitState == ExitState.WAITING) buildExitCard()
+    }
+
+    private enum class ExitState { IDLE, WAITING, DRAGGING, FINISHING }
+    private var exitState = ExitState.IDLE
+    private var exitProgress = 0f
+    private var exitImage: ImageView? = null
+    private var exitBackdropIsFallback = false
+    private var pendingRelease: Pair<Boolean, () -> Unit>? = null
+
+    /** The finger started dragging FlipFix to the left. */
+    fun startExitDrag() {
+        if (exitState == ExitState.FINISHING) return
+        exitState = ExitState.WAITING
+        exitProgress = 0f
+        pendingRelease = null
+        if (freshFace() != null) buildExitCard()
+    }
+
+    /** 0 = card covers the screen, 1 = card shrunk and moved left by the full drag distance. */
+    fun updateExitDrag(progress: Float) {
+        exitProgress = progress.coerceIn(0f, 1f)
+        if (exitState == ExitState.DRAGGING) applyExit(exitProgress)
+    }
+
+    /** Finger lifted: [commit] = go to the widgets ([onCovered] steps FlipFix aside), else spring back. */
+    fun releaseExitDrag(commit: Boolean, onCovered: () -> Unit) {
+        when (exitState) {
+            ExitState.DRAGGING -> finishExit(commit, onCovered)
+            ExitState.WAITING -> if (commit) {
+                // The snapshot is still on its way; finish as soon as it lands, or step aside plainly.
+                pendingRelease = true to onCovered
+                root?.postDelayed({
+                    if (exitState == ExitState.WAITING) { exitState = ExitState.IDLE; pendingRelease = null; onCovered() }
+                }, FACE_WAIT_MS) ?: run { exitState = ExitState.IDLE; onCovered() }
+            } else {
+                exitState = ExitState.IDLE
+            }
+            else -> if (commit) onCovered()
+        }
+    }
+
+    private fun buildExitCard() {
+        val face = freshFace() ?: return
+        show()
+        val ctx = root?.context ?: return
+        cornerRadius = 0f
+        val widgets = CoverState.widgetsSnapshot
+        exitBackdropIsFallback = widgets == null
+        val backdrop = ImageView(ctx).apply {
+            scaleType = ImageView.ScaleType.FIT_XY
+            if (widgets != null) {
+                setImageBitmap(widgets)
+            } else {
+                // No capture of the widget screen yet: imitate its background, which is the paused cover
+                // video blurred and dimmed by Samsung (the widget cards then fade in at the end).
+                setImageBitmap(face)
+                val dim = ColorMatrixColorFilter(ColorMatrix().apply { setScale(FALLBACK_DIM, FALLBACK_DIM, FALLBACK_DIM, 1f) })
+                setRenderEffect(
+                    RenderEffect.createChainEffect(
+                        RenderEffect.createColorFilterEffect(dim),
+                        RenderEffect.createBlurEffect(FALLBACK_BLUR_PX, FALLBACK_BLUR_PX, Shader.TileMode.CLAMP),
+                    ),
+                )
+            }
+        }
+        val image = ImageView(ctx).apply {
+            scaleType = ImageView.ScaleType.FIT_XY
+            setImageBitmap(face)
+        }
+        buildCard(listOf(image), backdrop) ?: return
+        faceSnapshot = face
+        exitImage = image
+        exitState = ExitState.DRAGGING
+        awaitingFace = true // the overlay ignores new touches; the drag itself stays with FlipFix
+        applyExit(exitProgress)
+        pendingRelease?.let { (commit, onCovered) -> pendingRelease = null; finishExit(commit, onCovered) }
+    }
+
+    private fun applyExit(q: Float) {
+        val c = card ?: return
+        val s = 1f - (1f - CARD_SCALE_MIN) * q
+        c.scaleX = s; c.scaleY = s
+        c.translationX = -q * screenW * DRAG_DISTANCE_FRACTION // 1:1 with the finger
+        cornerRadius = CORNER_DP * density * min(1f, q * 3f)
+        c.invalidateOutline()
+        val blur = LIGHT_BLUR_PX * q
+        exitImage?.setRenderEffect(
+            if (blur > 0.5f) RenderEffect.createBlurEffect(blur, blur, Shader.TileMode.CLAMP) else null,
+        )
+        scrim?.alpha = SCRIM_MAX * (1 - q)
+    }
+
+    private fun finishExit(commit: Boolean, onCovered: () -> Unit) {
+        val c = card ?: run { exitState = ExitState.IDLE; if (commit) onCovered(); return }
+        exitState = ExitState.FINISHING
+        val from = exitProgress
+        if (commit) {
+            onCovered() // FlipFix steps aside underneath; the real widgets now match the backdrop
+            val startX = c.translationX
+            val startScale = c.scaleX
+            ValueAnimator.ofFloat(0f, 1f).apply {
+                duration = (EXIT_MS * (1 - from * 0.5f)).toLong()
+                interpolator = DecelerateInterpolator()
+                addUpdateListener {
+                    val f = it.animatedValue as Float
+                    val s = startScale + (CARD_SCALE_MIN - startScale) * f
+                    c.scaleX = s; c.scaleY = s
+                    c.translationX = startX + (-screenW - startX) * f
+                    cornerRadius = CORNER_DP * density
+                    c.invalidateOutline()
+                    scrim?.alpha = SCRIM_MAX * (1 - from) * (1 - f)
+                }
+                withEnd {
+                    val finish: () -> Unit = {
+                        exitState = ExitState.IDLE
+                        awaitingFace = false
+                        exitImage = null
+                        collapse()
+                        Log.d(CoverState.TAG, "edge exit played (dragged${if (exitBackdropIsFallback) ", fallback backdrop" else ""})")
+                        onExitFinished?.invoke()
+                    }
+                    val view = root
+                    if (exitBackdropIsFallback && view != null) {
+                        // The stand-in backdrop has no widget cards: fade it so the real ones fade in.
+                        view.animate().alpha(0f).setDuration(FALLBACK_FADE_MS).withEndAction { finish() }.start()
+                    } else {
+                        finish()
+                    }
+                }
+            }.start()
+        } else {
+            ValueAnimator.ofFloat(from, 0f).apply {
+                duration = CANCEL_MS
+                interpolator = DecelerateInterpolator()
+                addUpdateListener { applyExit(it.animatedValue as Float) }
+                withEnd {
+                    exitState = ExitState.IDLE
+                    awaitingFace = false
+                    exitImage = null
+                    hide() // FlipFix never left; just remove the card
+                    Log.d(CoverState.TAG, "edge exit cancelled")
+                }
+            }.start()
+        }
+    }
+
     /**
      * Swipe-away animation (the reverse of the peek): a card showing [snapshot] covers the screen exactly,
      * [onCovered] lets FlipFix step aside underneath it, then the card shrinks, rounds its corners, blurs
@@ -235,6 +405,7 @@ class EdgeReturn(
                         awaitingFace = false
                         collapse()
                         Log.d(CoverState.TAG, "edge exit played")
+                        onExitFinished?.invoke()
                     }
                 }.start()
             }
@@ -256,6 +427,8 @@ class EdgeReturn(
     private fun collapse() {
         val view = root ?: return
         view.removeAllViews()
+        view.animate().cancel()
+        view.alpha = 1f
         card = null; scrim = null
         val lp = params ?: return
         lp.width = stripWidth()
@@ -393,6 +566,11 @@ class EdgeReturn(
         const val LIGHT_BLUR_PX = 5f
         const val EXIT_MS = 260L
         const val EXIT_DELAY_MS = 40L // let the widgets settle in underneath first
+        const val FACE_FRESH_MS = 1500L // a face snapshot this recent still matches the screen
+        const val FACE_WAIT_MS = 300L
+        const val FALLBACK_BLUR_PX = 40f
+        const val FALLBACK_DIM = 0.72f
+        const val FALLBACK_FADE_MS = 160L
         const val SCRIM_MAX = 0.5f
         const val COMMIT_MS = 190L
         const val CANCEL_MS = 180L

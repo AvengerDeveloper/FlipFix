@@ -13,7 +13,9 @@ import android.view.View
 import android.view.WindowInsets
 import android.view.WindowInsetsController
 import java.lang.ref.WeakReference
+import android.os.SystemClock
 import kotlin.math.abs
+import kotlin.math.hypot
 
 /**
  * The unlocked cover face. Shows Samsung's own cover wallpaper (we are the wallpaper target) and asks
@@ -95,21 +97,79 @@ class CoverActivity : Activity() {
     /** Set by the fling listener when a swipe was recognised and acted on. */
     private var flingHandled = false
 
+    // Swipe-away that follows the finger (see EdgeReturn): a leftward drag moves a snapshot card.
+    private var exitDragging = false
+    private var exitDecided = false
+    private var downX = 0f
+    private var downY = 0f
+    private var downAt = 0L
+    private val touchSlop by lazy { android.view.ViewConfiguration.get(this).scaledTouchSlop }
+
     /**
      * Every touch feeds the swipe detector and also reaches the views (so the music pill's buttons get
-     * taps). When a swipe is acted on, the views get a cancel instead of the end of the gesture.
+     * taps). A leftward drag becomes the interactive swipe-away; other swipes are flings (right = widgets
+     * without following the finger, up = Wallet). When a swipe is acted on, the views get a cancel.
      */
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        val drag = CoverState.exitDrag
+        when (ev.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                downX = ev.rawX; downY = ev.rawY; downAt = SystemClock.uptimeMillis()
+                exitDragging = false; exitDecided = false
+                drag?.prepare() // snapshot now, so the card is ready the moment a drag starts
+            }
+            MotionEvent.ACTION_MOVE -> {
+                val dx = ev.rawX - downX
+                val dy = ev.rawY - downY
+                if (!exitDecided && hypot(dx, dy) > touchSlop) {
+                    exitDecided = true
+                    if (drag != null && dx < 0 && abs(dx) > abs(dy) * 1.2f) {
+                        exitDragging = true
+                        drag.start()
+                        cancelChildren(ev)
+                    }
+                }
+                if (exitDragging) {
+                    drag?.update(-dx / (exitDistance()))
+                    return true
+                }
+            }
+            MotionEvent.ACTION_UP -> if (exitDragging) {
+                exitDragging = false
+                val dx = ev.rawX - downX
+                val progress = (-dx / exitDistance()).coerceIn(0f, 1f)
+                val velocity = -dx / (SystemClock.uptimeMillis() - downAt).coerceAtLeast(1) // px per ms
+                val commit = progress > EXIT_COMMIT_PROGRESS ||
+                    (velocity > EXIT_FLICK_DP_PER_MS * resources.displayMetrics.density && -dx > touchSlop * 2)
+                if (commit) CoverState.dismissed = true
+                (drag ?: return true).release(commit) { moveTaskToBack(true) }
+                return true
+            }
+            MotionEvent.ACTION_CANCEL -> if (exitDragging) {
+                exitDragging = false
+                drag?.release(false) {}
+                return true
+            }
+        }
+        if (exitDragging) return true
+
         if (::gestures.isInitialized) gestures.onTouchEvent(ev)
         if (flingHandled) {
             flingHandled = false
-            val cancel = MotionEvent.obtain(ev).apply { action = MotionEvent.ACTION_CANCEL }
-            super.dispatchTouchEvent(cancel)
-            cancel.recycle()
+            cancelChildren(ev)
             return true
         }
         return super.dispatchTouchEvent(ev)
     }
+
+    private fun cancelChildren(ev: MotionEvent) {
+        val cancel = MotionEvent.obtain(ev).apply { action = MotionEvent.ACTION_CANCEL }
+        super.dispatchTouchEvent(cancel)
+        cancel.recycle()
+    }
+
+    /** Drag this far (same as the edge peek: 60% of the width) for the card to reach its smallest. */
+    private fun exitDistance() = window.decorView.width.coerceAtLeast(1) * 0.6f
 
     private fun resumeVideo(reason: String) {
         val token = window.decorView.windowToken ?: return
@@ -168,5 +228,7 @@ class CoverActivity : Activity() {
         const val CMD_RESUME = "samsung.android.wallpaper.resume"
         const val WALLET = "com.samsung.android.spay"
         const val MIN_SWIPE_DP = 48
+        const val EXIT_COMMIT_PROGRESS = 0.33f
+        const val EXIT_FLICK_DP_PER_MS = 0.4f
     }
 }

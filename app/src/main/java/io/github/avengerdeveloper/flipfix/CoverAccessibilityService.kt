@@ -85,7 +85,17 @@ class CoverAccessibilityService : AccessibilityService() {
         }
         // These are protected system broadcasts; EXPORTED is required for them to be delivered reliably.
         registerReceiver(receiver, filter, RECEIVER_EXPORTED)
-        CoverState.exitAnimator = { onCovered -> snapshotAndExit(onCovered) }
+        CoverState.exitAnimator = { onCovered ->
+            val face = edge.freshFace()
+            if (face != null) edge.playExit(face, onCovered) else snapshotAndExit(onCovered)
+        }
+        CoverState.exitDrag = object : CoverState.ExitDrag {
+            override fun prepare() = capture { it?.let(edge::offerFaceSnapshot) }
+            override fun start() = edge.startExitDrag()
+            override fun update(progress: Float) = edge.updateExitDrag(progress)
+            override fun release(commit: Boolean, onCovered: () -> Unit) = edge.releaseExitDrag(commit, onCovered)
+        }
+        edge.onExitFinished = { scheduleWidgetsCapture() }
         Log.i(CoverState.TAG, "accessibility service connected")
         maybeLaunch("service connected")
     }
@@ -114,7 +124,10 @@ class CoverAccessibilityService : AccessibilityService() {
                 CoverState.dismissed = false
                 startUnlockPoll()
             }
-            isSubHome && CoverState.dismissed -> edge.show()
+            isSubHome && CoverState.dismissed -> {
+                edge.show()
+                scheduleWidgetsCapture()
+            }
             isSubHome -> maybeLaunch("Samsung cover home shown")
             isAppScreen -> {
                 if (edge.isShown) {
@@ -129,34 +142,64 @@ class CoverAccessibilityService : AccessibilityService() {
 
 
     /**
-     * Swipe-away: screenshot the cover (FlipFix's own face, in memory only) and play the card exit with it.
+     * Swipe-away without a fresh snapshot: screenshot the cover and play the card exit with it.
      * Any failure falls back to stepping aside immediately.
      */
     private fun snapshotAndExit(onCovered: () -> Unit) {
         var done = false
         val once = { if (!done) { done = true; onCovered() } }
+        capture { bitmap -> if (bitmap == null) once() else edge.playExit(bitmap, once) }
+        // Never leave FlipFix stuck on screen if the screenshot never answers.
+        handler.postDelayed({ once() }, SNAPSHOT_TIMEOUT_MS)
+    }
+
+    private var lastCaptureAt = 0L
+    private var captureInFlight = false
+
+    /**
+     * Screenshot of the cover display only, kept in memory for the swipe animations; never saved or sent.
+     * Android allows roughly one every 333 ms, so requests closer than that are skipped.
+     */
+    private fun capture(onResult: (Bitmap?) -> Unit) {
+        val now = SystemClock.uptimeMillis()
+        if (captureInFlight || now - lastCaptureAt < CAPTURE_INTERVAL_MS) return onResult(null)
+        captureInFlight = true
+        lastCaptureAt = now
         try {
             takeScreenshot(CoverState.coverDisplayId(displayManager), mainExecutor, object : TakeScreenshotCallback {
                 override fun onSuccess(result: ScreenshotResult) {
+                    captureInFlight = false
                     val buffer = result.hardwareBuffer
                     val bitmap = runCatching {
                         Bitmap.wrapHardwareBuffer(buffer, result.colorSpace)?.copy(Bitmap.Config.ARGB_8888, false)
                     }.getOrNull()
                     buffer.close()
-                    if (bitmap == null) once() else edge.playExit(bitmap, once)
+                    onResult(bitmap)
                 }
 
                 override fun onFailure(errorCode: Int) {
+                    captureInFlight = false
                     Log.w(CoverState.TAG, "cover snapshot failed ($errorCode)")
-                    once()
+                    onResult(null)
                 }
             })
         } catch (t: Throwable) {
+            captureInFlight = false
             Log.w(CoverState.TAG, "cover snapshot unavailable", t)
-            once()
+            onResult(null)
         }
-        // Never leave FlipFix stuck on screen if the screenshot never answers.
-        handler.postDelayed({ once() }, SNAPSHOT_TIMEOUT_MS)
+    }
+
+    private val widgetsCapture = Runnable {
+        if (CoverState.dismissed && edge.isIdleStrip) {
+            capture { bitmap -> if (bitmap != null && edge.isIdleStrip) CoverState.widgetsSnapshot = bitmap }
+        }
+    }
+
+    /** Capture Samsung's widget screen once it has settled, as the backdrop for the next swipe-away. */
+    private fun scheduleWidgetsCapture() {
+        handler.removeCallbacks(widgetsCapture)
+        handler.postDelayed(widgetsCapture, WIDGETS_CAPTURE_DELAY_MS)
     }
 
     override fun onInterrupt() = Unit
@@ -164,6 +207,7 @@ class CoverAccessibilityService : AccessibilityService() {
     override fun onDestroy() {
         handler.removeCallbacksAndMessages(null)
         CoverState.exitAnimator = null
+        CoverState.exitDrag = null
         edge.hide()
         runCatching { unregisterReceiver(receiver) }
         Log.i(CoverState.TAG, "accessibility service destroyed")
@@ -213,6 +257,8 @@ class CoverAccessibilityService : AccessibilityService() {
         const val SYSTEMUI = "com.android.systemui"
         const val EDGE_REASON = "edge swipe right"
         const val SNAPSHOT_TIMEOUT_MS = 400L
+        const val CAPTURE_INTERVAL_MS = 350L
+        const val WIDGETS_CAPTURE_DELAY_MS = 600L
         const val SUB_HOME = "SubHomeActivity"
         const val UNLOCK_POLL_MS = 16L
         const val UNLOCK_POLL_WINDOW_MS = 2_000L

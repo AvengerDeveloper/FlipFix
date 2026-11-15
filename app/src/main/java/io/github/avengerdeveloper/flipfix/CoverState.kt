@@ -2,6 +2,7 @@ package io.github.avengerdeveloper.flipfix
 
 import android.app.Activity
 import android.content.Context
+import android.graphics.Bitmap
 import android.graphics.drawable.Icon
 import java.lang.ref.WeakReference
 import java.util.concurrent.CopyOnWriteArraySet
@@ -45,6 +46,24 @@ object CoverState {
      * Null when the service isn't running; the face then steps aside without the animation.
      */
     @Volatile var exitAnimator: ((onCovered: () -> Unit) -> Unit)? = null
+
+    /** Swiping the cover face away with the card following the finger (provided by the service). */
+    interface ExitDrag {
+        /** Finger down on the face: take a fresh snapshot in case this becomes a swipe-away. */
+        fun prepare()
+        fun start()
+        fun update(progress: Float)
+        fun release(commit: Boolean, onCovered: () -> Unit)
+    }
+
+    @Volatile var exitDrag: ExitDrag? = null
+
+    /**
+     * Last capture of Samsung's widget screen (memory only), the backdrop while FlipFix is swiped away.
+     * Kept here rather than in the accessibility service so it survives the service being switched off
+     * whenever the phone is opened.
+     */
+    @Volatile var widgetsSnapshot: Bitmap? = null
 
     private val faceShownOnce = CopyOnWriteArraySet<() -> Unit>()
 
