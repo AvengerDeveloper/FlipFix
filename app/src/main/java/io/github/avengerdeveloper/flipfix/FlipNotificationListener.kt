@@ -8,6 +8,7 @@ import android.hardware.display.DisplayManager
 import android.os.Handler
 import android.os.Looper
 import android.os.PowerManager
+import android.app.Notification
 import android.app.NotificationManager
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
@@ -68,7 +69,8 @@ class FlipNotificationListener : NotificationListenerService() {
 
     /**
      * Mirrors Samsung's cover icons (checked on One UI 9): one icon per app, newest first, skipping
-     * notifications with "min" importance (e.g. the ongoing "Battery protection" notification).
+     * notifications with "min" importance (e.g. the ongoing "Battery protection" notification) and media
+     * players (Samsung shows those in its Now bar, never as an icon).
      */
     private fun publishIcons() {
         val active = runCatching { activeNotifications }.getOrNull() ?: return
@@ -78,14 +80,23 @@ class FlipNotificationListener : NotificationListenerService() {
             .filter { sbn ->
                 sbn.packageName != packageName &&
                     sbn.notification.smallIcon != null &&
+                    !isMedia(sbn.notification) &&
                     (!ranking.getRanking(sbn.key, r) || r.importance >= NotificationManager.IMPORTANCE_LOW)
             }
             .groupBy { it.packageName }
             .map { (_, list) -> list.maxBy { it.postTime } }
             .sortedByDescending { it.postTime }
             .map { CoverState.NotificationIcon(it.packageName, it.notification.smallIcon) }
+        if (icons.map { it.packageName } != CoverState.notificationIcons.map { it.packageName }) {
+            Log.d(CoverState.TAG, "cover icons: ${icons.map { it.packageName }}")
+        }
         CoverState.publishNotificationIcons(icons)
     }
+
+    private fun isMedia(n: Notification): Boolean =
+        n.extras.containsKey(Notification.EXTRA_MEDIA_SESSION) ||
+            n.category == Notification.CATEGORY_TRANSPORT ||
+            n.extras.getString(Notification.EXTRA_TEMPLATE)?.contains("MediaStyle") == true
 
     override fun onListenerDisconnected() {
         if (::displayManager.isInitialized) {

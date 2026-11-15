@@ -180,15 +180,15 @@ class CoverStatusView @JvmOverloads constructor(
         canvas.drawPath(path, checkPaint)
     }
 
-    /** Lightning bolt for charging. */
+    /** Lightning bolt for charging (Samsung's is ~12x14 px on the Flip6 cover, inside the 14x16 glyph box). */
     private fun drawBolt(canvas: Canvas, x: Float, y: Float, w: Float, h: Float) {
         path.reset()
-        path.moveTo(x + w * 0.62f, y)
-        path.lineTo(x + w * 0.12f, y + h * 0.58f)
+        path.moveTo(x + w * 0.65f, y)
+        path.lineTo(x + w * 0.03f, y + h * 0.58f)
         path.lineTo(x + w * 0.46f, y + h * 0.58f)
-        path.lineTo(x + w * 0.36f, y + h)
-        path.lineTo(x + w * 0.88f, y + h * 0.40f)
-        path.lineTo(x + w * 0.54f, y + h * 0.40f)
+        path.lineTo(x + w * 0.33f, y + h)
+        path.lineTo(x + w * 0.97f, y + h * 0.40f)
+        path.lineTo(x + w * 0.56f, y + h * 0.40f)
         path.close()
         canvas.drawPath(path, inkPaint)
     }
@@ -211,7 +211,7 @@ class CoverStatusView @JvmOverloads constructor(
         const val PILL_TOP = 21f
         const val PILL_BOTTOM = 51.5f
         const val PILL_PAD_LEFT = 10f
-        const val PILL_PAD_RIGHT = 9.5f
+        const val PILL_PAD_RIGHT = 10.5f
         const val GLYPH_GAP = 5f
         const val GLYPH_W = 14f
         const val GLYPH_H = 16f

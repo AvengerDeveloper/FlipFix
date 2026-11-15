@@ -19,7 +19,7 @@ you see is exactly the video you set in Wallpaper & style.
 |---|---|
 | Your cover video keeps playing | FlipFix takes over within a frame of the unlock |
 | Your clock stays exactly where it was | Same font, size and position as Samsung's lock screen |
-| Notification icons and battery | Samsung-style icons top-left; battery pill top-right with the protection shield |
+| Notification icons and battery | Samsung-style icons top-left; battery pill top-right with the charging bolt or protection shield |
 | Swipe left (or right) | Samsung's widgets, as before |
 | Swipe right from the left edge on the widgets | Back to your video |
 | Swipe up | Samsung Wallet |
@@ -101,7 +101,7 @@ screen is built on your firmware. None of the tools change anything on the phone
 ## Roadmap
 
 - Other Samsung clock styles (stacked, other fonts); the horizontal style is matched today
-- Confirm the charging icon in the battery pill (only battery protection has been seen so far)
+- Media controls pill (Samsung's Now bar: artwork, play/pause, next) at the bottom of the cover face
 - Ask once, then auto-pause, for banking apps opened on the cover screen; Quick Settings tile
 - Pre-built APKs on GitHub Releases
 
