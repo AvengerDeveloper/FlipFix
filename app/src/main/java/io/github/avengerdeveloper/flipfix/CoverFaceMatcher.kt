@@ -121,7 +121,7 @@ object CoverFaceMatcher {
         // Presets with the same clock (same style, place, size and colour) draw the same: compare once.
         val byLayout = CoverClockLayout.templates()
             .filter { CoverClockLayout.sameShape(it, coverW, coverH) }
-            .map { it to CoverClockLayout.parse(it) }
+            .map { it to CoverClockLayout.parse(context, it) }
             .filter { it.second != CoverClockLayout.Unknown }
             .groupBy({ it.second }, { it.first })
 

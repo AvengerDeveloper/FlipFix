@@ -56,8 +56,48 @@ class CoverClockRenderer(private val context: Context) {
         when (layout) {
             is CoverClockLayout.Horizontal -> drawHorizontal(canvas, layout.style, now, locale, screenW, screenH, offX, offY)
             is CoverClockLayout.Stacked -> drawStacked(canvas, layout, now, locale, screenW, screenH, offX, offY)
+            is CoverClockLayout.TwoLine -> drawTwoLine(canvas, layout, now, locale, screenW, screenH, offX, offY)
             CoverClockLayout.Unknown -> Unit
         }
+    }
+
+    private val twoLinePaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.SUBPIXEL_TEXT_FLAG)
+
+    /** Hours over minutes in the preset's AOD font, with the date line where the template has it. */
+    private fun drawTwoLine(
+        canvas: Canvas, l: CoverClockLayout.TwoLine, now: Date, locale: Locale,
+        screenW: Float, screenH: Float, offX: Float, offY: Float,
+    ) {
+        val tf = CoverClockFonts.typeface(context, l.font, l.weight) ?: return
+        val hours = DateFormat.format(if (DateFormat.is24HourFormat(context)) "HH" else "hh", now).toString()
+        val minutes = DateFormat.format("mm", now).toString()
+        twoLinePaint.typeface = tf
+        twoLinePaint.textSize = l.textSizeFrac * screenH
+        twoLinePaint.color = l.color or 0xFF000000.toInt()
+        val anchor = l.anchorXFrac * screenW
+        for ((text, baseline) in listOf(hours to l.hoursBaselineFrac, minutes to l.minutesBaselineFrac)) {
+            val adv = twoLinePaint.measureText(text)
+            val x = when (l.align) {
+                CoverClockLayout.Align.LEFT -> anchor
+                CoverClockLayout.Align.CENTER -> anchor - adv / 2
+                CoverClockLayout.Align.RIGHT -> anchor - adv
+            }
+            canvas.drawText(text, x - offX, baseline * screenH - offY, twoLinePaint)
+        }
+
+        val dateText = DateFormat.format(
+            DateFormat.getBestDateTimePattern(locale, if (l.dateLongMonth) "EEEdMMMM" else "EEEdMMM"), now,
+        ).toString()
+        lineDatePaint.textSize = l.dateTextSizeFrac * screenH
+        lineDatePaint.color = l.dateColor or 0xFF000000.toInt()
+        lineDatePaint.getTextBounds(dateText, 0, dateText.length, bounds)
+        val dateAnchor = l.dateAnchorXFrac * screenW
+        val dateX = when (l.align) {
+            CoverClockLayout.Align.LEFT -> dateAnchor - bounds.left
+            CoverClockLayout.Align.CENTER -> dateAnchor - (bounds.left + bounds.right) / 2f
+            CoverClockLayout.Align.RIGHT -> dateAnchor - bounds.right
+        }
+        canvas.drawText(dateText, dateX - offX, l.dateBaselineFrac * screenH - offY, lineDatePaint)
     }
 
     /**
