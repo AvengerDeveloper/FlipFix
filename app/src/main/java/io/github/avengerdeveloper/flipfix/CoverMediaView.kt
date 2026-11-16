@@ -88,6 +88,10 @@ class CoverMediaView @JvmOverloads constructor(
     private val nextHit = RectF()
     private val openHit = RectF()
 
+    /** Reference-to-screen transform used for drawing (density scale, bottom-left anchor). */
+    private var scale = 1f
+    private var originY = 0f
+
     private val sessionsListener = MediaSessionManager.OnActiveSessionsChangedListener { pickController(it) }
     private val controllerCallback = object : MediaController.Callback() {
         override fun onMetadataChanged(metadata: MediaMetadata?) = readMetadata()
@@ -200,11 +204,22 @@ class CoverMediaView @JvmOverloads constructor(
         super.onDraw(canvas)
         if (controller == null || title.isEmpty()) return
         val bounds = context.getSystemService(WindowManager::class.java)?.currentWindowMetrics?.bounds
-        val sx = (bounds?.width() ?: width) / REF_W
-        val sy = (bounds?.height() ?: height) / REF_H
+        val screenH = (bounds?.height() ?: height).toFloat()
         val loc = IntArray(2).also(::getLocationOnScreen)
         canvas.save()
         canvas.translate(-loc[0].toFloat(), -loc[1].toFloat())
+        // Samsung keeps the pill the same physical size and margins on every cover: draw in the reference
+        // (Z Flip6) coordinates, scaled by density and anchored to the bottom-left corner.
+        scale = resources.displayMetrics.density / REF_DENSITY
+        // On taller covers Samsung raises the pill a little more than a fixed margin would
+        // (Flip6 41 dp, Flip8 45 dp from the bottom): ~4.6% of the extra height.
+        val density = resources.displayMetrics.density
+        val extraDp = ((screenH / density) - REF_H / REF_DENSITY).coerceAtLeast(0f) * TALL_COVER_LIFT
+        originY = screenH - REF_H * scale - extraDp * density
+        canvas.translate(0f, originY)
+        canvas.scale(scale, scale)
+        val sx = 1f
+        val sy = 1f
 
         pill.set(PILL_L * sx, PILL_T * sy, PILL_R * sx, PILL_B * sy)
         val radius = pill.height() / 2
@@ -359,8 +374,9 @@ class CoverMediaView @JvmOverloads constructor(
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
         if (controller == null) return false
-        val x = event.rawX
-        val y = event.rawY
+        // Hit areas are in the reference coordinates the pill is drawn in (see onDraw).
+        val x = event.rawX / scale
+        val y = (event.rawY - originY) / scale
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 downX = x; downY = y
@@ -393,8 +409,10 @@ class CoverMediaView @JvmOverloads constructor(
     }
 
     private companion object {
-        const val REF_W = 748f
         const val REF_H = 720f
+        /** Density of the reference cover (Z Flip6, 320 dpi). */
+        const val REF_DENSITY = 2.0f
+        const val TALL_COVER_LIFT = 0.0463f
 
         // Measured on Samsung's locked cover (Z Flip6, One UI 9).
         const val PILL_L = 30f

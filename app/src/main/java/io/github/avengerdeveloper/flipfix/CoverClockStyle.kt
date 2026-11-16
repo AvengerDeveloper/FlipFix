@@ -1,15 +1,14 @@
 package io.github.avengerdeveloper.flipfix
 
 import android.content.Context
-import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.graphics.Typeface
 import android.util.Log
 import java.io.File
 
 /**
- * How Samsung's horizontal cover clock ("13:49  Sun 15 November") is laid out, so FlipFix can draw an
- * identical one after unlock.
+ * How Samsung's one-line ("horizontal") cover clock ("13:49  Sun 15 November") is laid out, so FlipFix
+ * can draw an identical one after unlock. Other styles: see CoverClockLayout.
  *
  * Samsung leaves a rendered template of the user's cover face next to the cover wallpaper:
  * /data/overlays/coverwallpaper/0/<id>/cover_clock.png (readable by apps). From it we take the clock
@@ -52,67 +51,26 @@ data class CoverClockStyle(
         /** One UI 9 places the clock higher than the template rendered by Wallpaper & style. */
         private const val ONE_UI_9_Y_SHIFT = -0.0541f
 
-        /** Measured on the Flip6 lock screen; used when no template can be read. */
-        private val FALLBACK = CoverClockStyle(
-            rightFrac = 713.5f / 748f,
-            timeBaselineFrac = 470f / 720f,
-            digitHeightFrac = 38f / 720f,
-            color = Color.rgb(250, 250, 250),
-            fromTemplate = false,
-        )
-
-        private const val TEMPLATE_ROOT = "/data/overlays/coverwallpaper/0"
         private const val AOD_PACKAGE = "com.samsung.android.app.aodservice"
 
-        fun load(): CoverClockStyle = runCatching { fromTemplate() }
-            .onFailure { Log.w(CoverState.TAG, "cover clock template unreadable", it) }
-            .getOrNull() ?: FALLBACK
-
-        /** The template of the cover wallpaper set most recently. */
-        private fun templateFile(): File? = File(TEMPLATE_ROOT).listFiles()
-            ?.map { File(it, "cover_clock.png") }
-            ?.filter { it.canRead() }
-            ?.maxByOrNull { it.lastModified() }
-
-        private fun fromTemplate(): CoverClockStyle? {
-            val file = templateFile() ?: return null
-            val bmp = BitmapFactory.decodeFile(file.path) ?: return null
-            val w = bmp.width
-            val h = bmp.height
-            val px = IntArray(w * h).also { bmp.getPixels(it, 0, w, 0, 0, w, h) }
-            bmp.recycle()
-            fun ink(x: Int, y: Int) = Color.alpha(px[y * w + x]) > 110
-
-            // The top ~15% holds sample status icons (notifications, battery); the clock is below.
-            val top = (h * 0.15f).toInt()
-            var minX = w; var maxX = -1
-            for (y in top until h) for (x in 0 until w) if (ink(x, y)) {
-                if (x < minX) minX = x
-                if (x > maxX) maxX = x
-            }
-            if (maxX < 0) return null
-
-            // First glyph (leftmost column run) = a time digit: gives digit height and baseline.
+        /**
+         * The one-line clock, from its ink band in the template (see CoverClockLayout): the line's right
+         * edge, and the first glyph (a time digit) for digit height, baseline and colour.
+         */
+        fun fromBand(t: CoverClockLayout.Template, band: CoverClockLayout.Band): CoverClockStyle? {
+            val (minX, maxX) = t.xRange(band) ?: return null
+            // First glyph (leftmost column run) = a time digit.
             var gx1 = minX
-            while (gx1 + 1 < w && (top until h).any { ink(gx1 + 1, it) }) gx1++
-            var gy0 = h; var gy1 = -1
-            var r = 0L; var g = 0L; var b = 0L; var n = 0L
-            for (y in top until h) for (x in minX..gx1) if (ink(x, y)) {
-                if (y < gy0) gy0 = y
-                if (y > gy1) gy1 = y
-                val c = px[y * w + x]
-                if (Color.alpha(c) > 200) { r += Color.red(c); g += Color.green(c); b += Color.blue(c); n++ }
-            }
-            if (gy1 < 0) return null
-            val color = if (n > 0) Color.rgb((r / n).toInt(), (g / n).toInt(), (b / n).toInt()) else FALLBACK.color
-
+            while (gx1 + 1 < t.w && t.columnHasInk(band, gx1 + 1)) gx1++
+            val glyph = t.yRange(band, minX, gx1) ?: return null
+            val color = t.opaqueColor(glyph) ?: Color.rgb(250, 250, 250)
             return CoverClockStyle(
-                rightFrac = (maxX + 1f) / w,
-                timeBaselineFrac = (gy1 + 1f) / h + ONE_UI_9_Y_SHIFT,
-                digitHeightFrac = (gy1 - gy0 + 1f) / h,
+                rightFrac = (maxX + 1f) / t.w,
+                timeBaselineFrac = (glyph.bottom + 1f) / t.h + ONE_UI_9_Y_SHIFT,
+                digitHeightFrac = glyph.height.toFloat() / t.h,
                 color = color,
                 fromTemplate = true,
-            ).also { Log.d(CoverState.TAG, "cover clock from ${file.parentFile?.name}: $it") }
+            )
         }
 
         /** Samsung's clock digits, loaded from Samsung's AOD app (never bundled with FlipFix). */

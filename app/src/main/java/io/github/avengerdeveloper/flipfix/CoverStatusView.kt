@@ -101,10 +101,12 @@ class CoverStatusView @JvmOverloads constructor(
         val loc = IntArray(2).also(::getLocationOnScreen)
         canvas.save()
         canvas.translate(-loc[0].toFloat(), -loc[1].toFloat())
-        val sx = sw / REF_W
-        val sy = sh / REF_H
-        drawIcons(canvas, sx, sy)
-        if (level >= 0) drawBattery(canvas, sx, sy)
+        // Samsung keeps the status row the same physical size on every cover (same dp margins from the
+        // edges): scale by display density, anchor the icons to the left edge and the pill to the right.
+        // (Z Flip6 320 dpi -> 1.0, Z Flip8 380 dpi -> 1.19.)
+        val k = resources.displayMetrics.density / REF_DENSITY
+        drawIcons(canvas, k, k)
+        if (level >= 0) drawBattery(canvas, k, k, sw)
         canvas.restore()
     }
 
@@ -120,7 +122,7 @@ class CoverStatusView @JvmOverloads constructor(
         if (moreIcons) canvas.drawCircle(x + DOT_RADIUS * sy, ICON_CENTER_Y * sy, DOT_RADIUS * sy, dotPaint)
     }
 
-    private fun drawBattery(canvas: Canvas, sx: Float, sy: Float) {
+    private fun drawBattery(canvas: Canvas, sx: Float, sy: Float, screenW: Float) {
         val text = level.toString()
         textPaint.textSize = BATTERY_TEXT_SIZE * sy
         val textW = textPaint.measureText(text)
@@ -130,7 +132,7 @@ class CoverStatusView @JvmOverloads constructor(
             else -> Glyph.NONE
         }
 
-        val right = PILL_RIGHT * sx
+        val right = screenW - (REF_W - PILL_RIGHT) * sx
         val textRight = right - PILL_PAD_RIGHT * sx
         val textLeft = textRight - textW
         val glyphLeft = textLeft - GLYPH_GAP * sx - GLYPH_W * sy
@@ -198,7 +200,8 @@ class CoverStatusView @JvmOverloads constructor(
     private companion object {
         // Reference cover (Z Flip6) and measurements from Samsung's locked cover screen, in its pixels.
         const val REF_W = 748f
-        const val REF_H = 720f
+        /** Density of the reference cover (Z Flip6, 320 dpi). */
+        const val REF_DENSITY = 2.0f
 
         const val MAX_ICONS = 3
         const val ICON_LEFT = 33f

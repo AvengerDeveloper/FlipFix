@@ -10,8 +10,8 @@ flat grey widget grid.
 FlipFix brings the old flow back. No root, no Shizuku, and it uses **Samsung's own video engine**, so what
 you see is exactly the video you set in Wallpaper & style.
 
-> Status: early but working daily on a Z Flip6 (One UI 9.0). The clock, notification icons, battery pill and
-> music pill match Samsung's cover lock screen to within a pixel or two.
+> Status: working daily on a Z Flip6 and a Z Flip8 (One UI 9.0). The clock, notification icons, battery pill
+> and music pill match Samsung's cover lock screen to within a few pixels.
 
 ## What you get
 
@@ -38,9 +38,18 @@ UI on top. FlipFix:
 2. sends the matching `samsung.android.wallpaper.resume` command, so Samsung's player keeps going.
 
 The clock is drawn to match Samsung's: Wallpaper & style leaves a rendered template of your cover face
-(`cover_clock.png`) next to the cover video, which gives the clock's position, size and colour, and the
-digits use Samsung's own clock font, loaded at runtime from Samsung's AOD app (FlipFix does not ship any
-Samsung fonts).
+(`cover_clock.png`) next to the cover video. FlipFix reads which clock style you use from it, plus the
+position, size and colour, and draws that style with Samsung's own assets loaded at runtime from Samsung's
+AOD app (FlipFix ships none of them):
+
+| Clock style | Typical phone | How FlipFix draws it |
+|---|---|---|
+| One line: `13:49  Sun 15 November` | Z Flip6 | Samsung's ClockModex font |
+| Stacked: date over big rounded digits | Z Flip8 | Samsung's own digit paths (`big_clock_num_*`), drawn as round lines |
+| Anything else | | No clock (safety net), rather than a wrong one |
+
+Samsung's weather on the stacked style comes from a provider ordinary apps can't read, so FlipFix keeps the
+date where it is and leaves the weather's space empty.
 
 The full investigation is in [`research/`](research/).
 
@@ -61,8 +70,8 @@ app's name looks financial. A **Quick Settings tile** switches FlipFix on or off
 
 ## Requirements
 
-- Galaxy Z Flip on **One UI 9** (tested: Z Flip6 `SM-F741B`, One UI 9.0 / Android 17). Flip 5 / 7 / 8 should
-  behave the same; reports welcome.
+- Galaxy Z Flip on **One UI 9** (tested: Z Flip6 `SM-F741B` and Z Flip8 `SM-F776B`, One UI 9.0 / Android 17).
+  Flip 5 / 7 should behave the same; reports welcome.
 - A PC with [Android SDK Platform-Tools](https://developer.android.com/tools/releases/platform-tools)
   (`adb`) for the one-time setup, and Android Studio or a JDK to build.
 
@@ -106,7 +115,8 @@ screen is built on your firmware. None of the tools change anything on the phone
 
 ## Roadmap
 
-- Other Samsung clock styles (stacked, other fonts); the horizontal style is matched today
+- More Samsung clock styles (the one-line and stacked styles are matched today)
+- Weather on the stacked style
 - Pre-built APKs on GitHub Releases
 
 ## Disclaimer
