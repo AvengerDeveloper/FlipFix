@@ -1,0 +1,63 @@
+# Builds FlipFix on GitHub.
+#  - Every push to main and every pull request: a debug APK, attached to the run as an artifact.
+#  - Every tag like v1.2.3: a release APK signed with the FlipFix key (repository secrets), published as a
+#    GitHub Release named after the tag.
+name: Build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+
+permissions:
+  contents: write # create releases on tags
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Build debug APK
+        run: |
+          chmod +x gradlew
+          ./gradlew :app:assembleDebug --no-daemon
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: FlipFix-debug-${{ github.sha }}
+          path: app/build/outputs/apk/debug/*.apk
+          retention-days: 14
+
+      - name: Build signed release APK and publish it
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          KEYSTORE_BASE64: ${{ secrets.FLIPFIX_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.FLIPFIX_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.FLIPFIX_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.FLIPFIX_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          clean() { printf '%s' "$1" | tr -d '\r\n'; }
+          printf '%s' "$KEYSTORE_BASE64" | tr -d '\r\n ' | base64 -d > "$RUNNER_TEMP/flipfix-release.jks"
+          export FLIPFIX_KEYSTORE="$RUNNER_TEMP/flipfix-release.jks"
+          export FLIPFIX_KEYSTORE_PASSWORD="$(clean "$KEYSTORE_PASSWORD")"
+          export FLIPFIX_KEY_ALIAS="$(clean "$KEY_ALIAS")"
+          export FLIPFIX_KEY_PASSWORD="$(clean "$KEY_PASSWORD")"
+          export FLIPFIX_VERSION_NAME="${GITHUB_REF_NAME#v}"
+          export FLIPFIX_VERSION_CODE="$GITHUB_RUN_NUMBER"
+          ./gradlew :app:assembleRelease --no-daemon
+          apk="FlipFix-${GITHUB_REF_NAME}.apk"
+          cp app/build/outputs/apk/release/app-release.apk "$apk"
+          rm -f "$FLIPFIX_KEYSTORE"
+          gh release create "$GITHUB_REF_NAME" "$apk" --title "FlipFix ${GITHUB_REF_NAME}" --generate-notes
