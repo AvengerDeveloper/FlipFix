@@ -9,3 +9,6 @@ captures/
 
 # Device probe dumps: contain personal app lists, notifications and settings
 probe-output/
+
+# Built or downloaded APKs (releases are published by CI)
+*.apk
