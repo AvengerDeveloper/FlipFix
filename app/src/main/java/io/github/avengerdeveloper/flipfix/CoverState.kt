@@ -7,6 +7,7 @@ import android.graphics.drawable.Icon
 import java.lang.ref.WeakReference
 import java.util.concurrent.CopyOnWriteArraySet
 import android.hardware.display.DisplayManager
+import android.media.session.MediaSession
 import android.os.PowerManager
 import android.view.Display
 
@@ -39,6 +40,26 @@ object CoverState {
 
     fun observeNotificationIcons(observer: () -> Unit) = notificationObservers.add(observer)
     fun stopObservingNotificationIcons(observer: () -> Unit) = notificationObservers.remove(observer)
+
+    /**
+     * Apps that currently have a media-player notification posted (by package, and by the session token the
+     * notification carries). Samsung's Now bar drops a paused player once its app removes that notification;
+     * the music pill does the same.
+     */
+    data class MediaNotifications(val packages: Set<String>, val sessions: Set<MediaSession.Token>)
+
+    @Volatile var mediaNotifications = MediaNotifications(emptySet(), emptySet())
+        private set
+    private val mediaObservers = CopyOnWriteArraySet<() -> Unit>()
+
+    fun publishMediaNotifications(media: MediaNotifications) {
+        if (media == mediaNotifications) return
+        mediaNotifications = media
+        mediaObservers.forEach { it() }
+    }
+
+    fun observeMediaNotifications(observer: () -> Unit) = mediaObservers.add(observer)
+    fun stopObservingMediaNotifications(observer: () -> Unit) = mediaObservers.remove(observer)
 
     /**
      * Set by the accessibility service: plays the "slide away" card animation for the cover face and calls

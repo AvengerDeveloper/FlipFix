@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.hardware.display.DisplayManager
+import android.media.session.MediaSession
 import android.os.Handler
 import android.os.Looper
 import android.os.PowerManager
@@ -98,6 +99,17 @@ class FlipNotificationListener : NotificationListenerService() {
             Log.d(CoverState.TAG, "cover icons: ${icons.map { it.packageName }}")
         }
         CoverState.publishNotificationIcons(icons)
+
+        // The players' own notifications (not SystemUI's Now bar mirror), for the music pill.
+        val players = active.filter { it.packageName != "com.android.systemui" && isMedia(it.notification) }
+        CoverState.publishMediaNotifications(
+            CoverState.MediaNotifications(
+                packages = players.map { it.packageName }.toSet(),
+                sessions = players.mapNotNull {
+                    it.notification.extras.getParcelable(Notification.EXTRA_MEDIA_SESSION, MediaSession.Token::class.java)
+                }.toSet(),
+            ),
+        )
     }
 
     /**

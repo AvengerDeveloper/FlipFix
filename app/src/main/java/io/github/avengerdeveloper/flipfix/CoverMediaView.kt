@@ -102,14 +102,18 @@ class CoverMediaView @JvmOverloads constructor(
         override fun onSessionDestroyed() = pickController(activeSessions())
     }
 
+    private val mediaNotificationsObserver: () -> Unit = { post { pickController(activeSessions()) } }
+
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
         runCatching { sessions.addOnActiveSessionsChangedListener(sessionsListener, listenerComponent) }
             .onFailure { Log.w(CoverState.TAG, "media sessions unavailable (notification access?)", it) }
+        CoverState.observeMediaNotifications(mediaNotificationsObserver)
         pickController(activeSessions())
     }
 
     override fun onDetachedFromWindow() {
+        CoverState.stopObservingMediaNotifications(mediaNotificationsObserver)
         runCatching { sessions.removeOnActiveSessionsChangedListener(sessionsListener) }
         controller?.unregisterCallback(controllerCallback)
         controller = null
@@ -119,11 +123,19 @@ class CoverMediaView @JvmOverloads constructor(
     private fun activeSessions(): List<MediaController> =
         runCatching { sessions.getActiveSessions(listenerComponent) }.getOrDefault(emptyList())
 
-    /** Playing first, else paused (most recent first, as the system orders sessions). */
+    /**
+     * Playing first, else paused (most recent first, as the system orders sessions). Like Samsung's Now bar,
+     * a paused player only counts while its app still shows its media notification: apps such as Spotify
+     * keep a paused session alive long after they remove the notification.
+     */
     private fun pickController(list: List<MediaController>?) {
         val all = list.orEmpty()
+        val media = CoverState.mediaNotifications
         val chosen = all.firstOrNull { it.playbackState?.state == PlaybackState.STATE_PLAYING }
-            ?: all.firstOrNull { it.playbackState?.let(::isShowable) == true }
+            ?: all.firstOrNull {
+                it.playbackState?.let(::isShowable) == true &&
+                    (it.sessionToken in media.sessions || it.packageName in media.packages)
+            }
         if (chosen?.sessionToken != controller?.sessionToken) {
             controller?.unregisterCallback(controllerCallback)
             controller = chosen
