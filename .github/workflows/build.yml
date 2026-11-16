@@ -59,7 +59,8 @@ jobs:
           export FLIPFIX_VERSION_NAME="${GITHUB_REF_NAME#v}"
           export FLIPFIX_VERSION_CODE="$GITHUB_RUN_NUMBER"
           ./gradlew :app:assembleRelease --no-daemon
-          apk="FlipFix-${GITHUB_REF_NAME}.apk"
+          # Same file name in every release, so releases/latest/download/FlipFix.apk always works.
+          apk="FlipFix.apk"
           cp app/build/outputs/apk/release/app-release.apk "$apk"
           rm -f "$FLIPFIX_KEYSTORE"
           gh release create "$GITHUB_REF_NAME" "$apk" --title "FlipFix ${GITHUB_REF_NAME}" --generate-notes
