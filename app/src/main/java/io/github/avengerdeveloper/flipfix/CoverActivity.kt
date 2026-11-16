@@ -62,7 +62,7 @@ class CoverActivity : Activity() {
      */
     private fun applyCoverTimeout() {
         val seconds = try {
-            Settings.System.getInt(contentResolver, COVER_TIMEOUT_SETTING)
+            Settings.System.getInt(contentResolver, CoverState.COVER_TIMEOUT_SETTING)
         } catch (e: Exception) {
             Log.w(CoverState.TAG, "cover timeout unreadable, using the main screen's: $e")
             return
@@ -258,8 +258,6 @@ class CoverActivity : Activity() {
 
     private companion object {
         const val CMD_RESUME = "samsung.android.wallpaper.resume"
-        /** Samsung's cover-screen timeout, in seconds. */
-        const val COVER_TIMEOUT_SETTING = "cover_screen_timeout"
         const val WALLET = "com.samsung.android.spay"
         const val MIN_SWIPE_DP = 48
         const val EXIT_COMMIT_PROGRESS = 0.33f

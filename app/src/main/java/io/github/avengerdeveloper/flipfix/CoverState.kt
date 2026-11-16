@@ -87,6 +87,9 @@ object CoverState {
 
     const val TAG = "FlipFix"
 
+    /** Samsung's cover screen timeout (Settings > Cover screen > Screen timeout), in seconds. */
+    const val COVER_TIMEOUT_SETTING = "cover_screen_timeout"
+
     /** User's master switch (main screen toggle). */
     fun isEnabled(context: Context): Boolean =
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_ENABLED, true)
