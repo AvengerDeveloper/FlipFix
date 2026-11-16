@@ -66,16 +66,29 @@ Full technical details and reverse-engineering notes are documented in [`researc
 
 ---
 
-## Privacy, Accessibility & Banking Apps
+## Privacy, Permissions & Banking Apps
 
-FlipFix is built to stay out of the way and keep everything on-device:
+FlipFix is built to stay out of the way and keep everything strictly on-device.
 
-* **Minimal Accessibility footprint:** Android only lets an app open a screen from the background in a few cases, and an Accessibility Service is one of them. FlipFix listens *only* for top-window state changes and **never** reads the text or structure of other apps' screens (window-content access is switched off in its configuration).
-* **In-memory swipe snapshots only:** During the swipe-to-widgets card animation, FlipFix captures temporary snapshots of its own cover face and Samsung's widget screen. They stay strictly in RAM, are never written to storage, and are overwritten on the next swipe.
-* **Zero internet permission:** FlipFix declares no `INTERNET` permission — nothing ever leaves your phone.
-* **Automatic banking app protection:** Many banking apps refuse to open while any accessibility service is active. Because FlipFix enables its service **only while the cover screen is on** and disables it the moment you unfold the phone (using `WRITE_SECURE_SETTINGS`), banking apps on the inner display never see it running.
-* **Cover-screen banking exclusions:** One UI 9 already blocks banking apps from launching on the cover screen (verified with two banks). If an app does open on the cover screen and complains, select it under **Choose banking apps…** inside FlipFix — FlipFix will automatically disable itself whenever that app is in the foreground. When an app with a finance-sounding name opens on the cover screen, FlipFix also asks once, by notification, whether to pause for it.
-* **Manual toggle:** A **Quick Settings tile** lets you switch FlipFix on or off anytime.
+### Permissions FlipFix Uses (3 Total)
+
+| Permission / Capability | Why It's Needed & Privacy Guardrails |
+| :--- | :--- |
+| **Accessibility Service**<br>(`BIND_ACCESSIBILITY_SERVICE`) | Android only allows an app to open a window on the cover screen from the background through a few privileged mechanisms. FlipFix listens *only* for top-window state changes and **never** reads screen text or UI structure (`canRetrieveWindowContent` is turned off in its XML configuration). Snapshots used for the swipe-to-widgets card animation stay strictly in RAM, are never written to storage, and are overwritten on the next swipe. |
+| **Write Secure Settings**<br>(`WRITE_SECURE_SETTINGS`) | Lets FlipFix turn its own Accessibility Service on only while the cover screen is active, and turn it off the instant you unfold the phone or open an excluded app. |
+| **Notification Access**<br>(`BIND_NOTIFICATION_LISTENER_SERVICE`) | Reads active notifications locally on-device solely to render the top-left notification icons and the Now bar music player pill (album artwork, track title, and playback controls). |
+
+### Permissions FlipFix Does Not Use
+
+* **No Internet (`INTERNET`):** Completely offline — no telemetry, no crash reporting, and nothing ever leaves your phone.
+* **No Storage or Media access:** Never reads or writes files on your device.
+* **No Location, Camera, Microphone, or Contacts:** Requests zero personal sensor or account permissions.
+
+### Banking App Protection
+
+* **Invisible to banking apps when unfolded:** Many banking apps refuse to run while any accessibility service is active. Because FlipFix disables its service the moment you open the phone, banking apps on the main screen never see it running.
+* **Cover-screen exclusions:** One UI 9 already blocks banking apps from launching on the cover screen (verified with two banks). If an app does open on the cover screen and complains, select it under **Choose banking apps…** inside FlipFix so FlipFix pauses itself whenever that app is in the foreground. When an app with a finance-sounding name opens on the cover screen, FlipFix also asks once via notification whether to pause for it.
+* **One-tap manual toggle:** A **Quick Settings tile** lets you switch FlipFix on or off anytime.
 
 ---
 
