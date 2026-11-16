@@ -30,10 +30,11 @@ object CoverClockCheck {
             val bmp = BitmapFactory.decodeFile(file.path) ?: continue
             val px = IntArray(bmp.width * bmp.height).also { bmp.getPixels(it, 0, bmp.width, 0, 0, bmp.width, bmp.height) }
             val t = CoverClockLayout.Template(px, bmp.width, bmp.height)
-            bmp.recycle()
             val layout = CoverClockAnalog.parse(t, withDate = false)
             println("$id: $layout")
-            if (layout !is CoverClockLayout.Analog) continue
+            if (layout !is CoverClockLayout.Analog) { bmp.recycle(); continue }
+            println("$id: dial and hands at 12:45:00 vs template, overlap %.3f".format(templateOverlap(bmp, layout)))
+            bmp.recycle()
             for (time in args) {
                 val (h, m, s) = time.split(':').map { it.toInt() }
                 val clock = Bitmap.createBitmap(COVER_W, COVER_H, Bitmap.Config.ARGB_8888)
@@ -44,6 +45,27 @@ object CoverClockCheck {
                 clock.recycle()
             }
         }
+    }
+
+    /**
+     * Overlap (IoU of solid ink) of FlipFix's drawing at the template's time with the whole template scaled
+     * to the cover, from the dial's top down (the status icons and date above it aren't drawn here).
+     */
+    private fun templateOverlap(template: Bitmap, l: CoverClockLayout.Analog): Float {
+        val scaled = Bitmap.createScaledBitmap(template, COVER_W, COVER_H, true)
+        val drawn = Bitmap.createBitmap(COVER_W, COVER_H, Bitmap.Config.ARGB_8888)
+        drawDialAndHands(Canvas(drawn), l, 12, 45, 0)
+        val a = IntArray(COVER_W * COVER_H).also { scaled.getPixels(it, 0, COVER_W, 0, 0, COVER_W, COVER_H) }
+        val b = IntArray(COVER_W * COVER_H).also { drawn.getPixels(it, 0, COVER_W, 0, 0, COVER_W, COVER_H) }
+        scaled.recycle(); drawn.recycle()
+        var both = 0; var either = 0
+        for (i in (l.dialTopFrac * COVER_H).toInt() * COVER_W until a.size) {
+            val ta = a[i] ushr 24 > 127
+            val fa = b[i] ushr 24 > 127
+            if (ta && fa) both++
+            if (ta || fa) either++
+        }
+        return if (either == 0) 0f else both.toFloat() / either
     }
 
     /**

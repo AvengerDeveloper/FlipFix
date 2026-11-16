@@ -153,11 +153,22 @@ internal object CoverClockAnalog {
             CoverClockLayout.Hand(len / unit, w / unit, (tail?.first ?: 0) / unit, (tail?.second ?: 0f) / unit)
         }
 
-        // The dial: the band of ink around the centre.
+        // The dial: the band of ink around the centre, and the bands beyond it that have ink mirrored across
+        // the centre (rows of numerals or ticks can have wide gaps between them, but sit symmetrically; the
+        // date line doesn't, so it stays apart).
         val bands = t.bands(from = from, mergeGap = (t.h * 0.006f).toInt())
-        val dialIndex = bands.indexOfFirst { cy.toInt() in it.top..it.bottom }
-        if (dialIndex < 0) return CoverClockLayout.Unknown
-        val dialBand = bands[dialIndex]
+        val centreIndex = bands.indexOfFirst { cy.toInt() in it.top..it.bottom }
+        if (centreIndex < 0) return CoverClockLayout.Unknown
+        fun mirrored(b: CoverClockLayout.Band): Boolean {
+            val y0 = (2 * cy - b.bottom).roundToInt()
+            val y1 = (2 * cy - b.top).roundToInt()
+            return y0 >= 0 && y1 < t.h && (y0..y1).any { y -> (0 until t.w).any { t.ink(it, y) } }
+        }
+        var first = centreIndex
+        while (first > 0 && mirrored(bands[first - 1])) first--
+        var last = centreIndex
+        while (last < bands.lastIndex && mirrored(bands[last + 1])) last++
+        val dialBand = CoverClockLayout.Band(bands[first].top, bands[last].bottom)
         val rect = t.inkRect(dialBand) ?: return CoverClockLayout.Unknown
 
         // Draw FlipFix's hands at the template's time: compare (in a corridor around them), and take the
@@ -208,7 +219,7 @@ internal object CoverClockAnalog {
             ?.let { it or 0xFF000000.toInt() } ?: color
 
         // The date: the thin line just above (or below) the dial.
-        val date = (bands.getOrNull(dialIndex - 1) ?: bands.getOrNull(dialIndex + 1))?.takeIf { withDate }
+        val date = (bands.getOrNull(first - 1) ?: bands.getOrNull(last + 1))?.takeIf { withDate }
             ?.takeIf { it.height < dialBand.height * 0.25f }
             ?.let { t.inkRect(it) }
             ?.let { dateRect ->
