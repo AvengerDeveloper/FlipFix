@@ -2,14 +2,57 @@
 
 **Keep your Galaxy Z Flip cover-screen video playing after you unlock — the way it worked before One UI 9.**
 
+[ELI5 Version](#eli5-version) · [Nerd Stuff](#nerd-stuff)
+
 <!-- Replace the line below with a short screen recording (demo.gif) or side-by-side screenshot -->
 <!-- ![FlipFix Demo](demo.gif) -->
 
-For four years, the Galaxy Z Flip cover screen worked the same way: the wallpaper or video you set *was* your cover screen. Swipe for widgets, swipe down for notifications, swipe up for Samsung Wallet. One UI 9 changed that by turning your cover video into a lock-screen-only view — the moment you unlock, Samsung pauses it and covers it with Now Brief or a flat grey widget grid.
+---
 
-**FlipFix** restores the original flow with **no root** and **no Shizuku**. It uses Samsung's own wallpaper engine directly, so what plays after you unlock is the exact video you configured in **Wallpaper & style**.
+## ELI5 Version
+
+### What is this?
+Samsung's One UI 9 update changed the cover screen on the Galaxy Z Flip. Now, the second you unlock your phone, Samsung pauses your cover video and covers it with a grey widget screen.
+
+**FlipFix** puts things back the way they used to be. When you unlock your folded phone, your video wallpaper, clock, notifications, and music player stay right on screen.
+
+### What works after installing?
+* **Your video keeps playing** after you unlock — using the exact video you already set in Samsung's Wallpaper settings.
+* **Your clock, notifications, and music controls** stay in their exact spots.
+* **Swipe left or right** to see your Samsung widgets; **swipe back** to return to your video.
+* **Swipe down from the top** for your normal notifications and quick settings.
+* **Double-press the power button** anytime to open the cover camera.
+* **Open your phone** and FlipFix turns itself off automatically.
+
+### Is it safe?
+* **100% offline:** FlipFix has no internet access, so nothing ever leaves your phone.
+* **Private:** It never reads your messages, passwords, or screen content.
+* **Banking-friendly:** Because FlipFix turns itself off the moment you unfold your phone, banking apps work normally without complaining.
+
+### How to install (takes ~3 minutes)
+Because Android blocks normal apps from changing how the cover screen behaves, you need to plug your phone into a computer **once** to give FlipFix permission. After that, you never need the computer again.
+
+1. **Get your phone ready:**
+   * Open **Settings → Security and privacy → Auto Blocker** and turn it **Off** *(Samsung blocks USB setup while this is on)*.
+   * Go to **Settings → About phone → Software information** and tap **Build number** 7 times until it says Developer mode is enabled.
+   * Go back to **Settings → Developer options**, turn **USB debugging** **On**, plug your phone into your computer with a USB cable, and tap **Allow** on the pop-up.
+2. **Download the setup tool & app on your computer:**
+   * Download Google's free [Platform-Tools](https://developer.android.com/tools/releases/platform-tools) and unzip the folder.
+   * Download `FlipFix.apk` from the [Releases](../../releases) page and put it inside that same folder.
+3. **Install and unlock permissions:**
+   * Open a terminal / Command Prompt inside that folder and paste these three lines one by one:
+     ```bash
+     adb install FlipFix.apk
+     adb shell pm grant io.github.avengerdeveloper.flipfix android.permission.WRITE_SECURE_SETTINGS
+     adb shell cmd notification allow_listener io.github.avengerdeveloper.flipfix/io.github.avengerdeveloper.flipfix.FlipNotificationListener
+     ```
+4. **Done!**
+   * Fold your phone, wake the cover screen, and unlock — your video will keep playing.
+   * *(Recommended)* Go to **Settings → Apps → FlipFix → Battery** and pick **Unrestricted** so Samsung doesn't put it to sleep, then turn **Auto Blocker** back **On** in **Settings → Security and privacy**.
 
 ---
+
+## Nerd Stuff
 
 ## Compatibility
 
