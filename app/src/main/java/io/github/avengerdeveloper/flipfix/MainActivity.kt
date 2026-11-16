@@ -47,7 +47,6 @@ class MainActivity : Activity() {
     private lateinit var secureRow: Row
     private lateinit var notifRow: Row
     private lateinit var helperRow: Row
-    private lateinit var timeoutRow: Row
     private lateinit var bankRow: Row
     private lateinit var forgetRow: Row
 
@@ -105,7 +104,7 @@ class MainActivity : Activity() {
         // Cover screen.
         page.addView(header("Cover screen"))
         helperRow = Row("Accessibility helper", "")
-        timeoutRow = Row("Screen timeout", "")
+        val timeoutRow = Row("Screen timeout", "Follows Samsung's cover screen timeout. Tap to change.")
             .trailing(chevron())
             .onClick { openCoverSettings() }
         val tileRow = Row("Quick Settings tile", "Turn FlipFix on or off from Quick Settings")
@@ -191,11 +190,6 @@ class MainActivity : Activity() {
             else "Off now · turns on by itself when you fold the phone",
         )
 
-        val timeout = coverTimeoutSeconds()
-        timeoutRow.summary(
-            if (timeout == null) "Follows Samsung's cover screen timeout · tap to change it"
-            else "Turns off after ${formatTimeout(timeout)}, like Samsung's cover screen · tap to change it",
-        )
 
         val paused = BankGuard.pausedApps(this).map { BankGuard.label(this, it) }.sorted()
         bankRow.summary(
@@ -237,25 +231,18 @@ class MainActivity : Activity() {
         }
     }
 
-    /** Samsung's cover screen timeout in seconds (the cover face uses it too), or null if unreadable. */
-    private fun coverTimeoutSeconds(): Int? = try {
-        Settings.System.getInt(contentResolver, CoverState.COVER_TIMEOUT_SETTING).takeIf { it > 0 }
-    } catch (e: Exception) {
-        null
-    }
-
-    private fun formatTimeout(seconds: Int): String = when {
-        seconds < 60 -> "$seconds seconds"
-        seconds % 60 == 0 -> (seconds / 60).let { if (it == 1) "1 minute" else "$it minutes" }
-        else -> "${seconds / 60} min ${seconds % 60} s"
-    }
-
-    /** Samsung's Settings > Cover screen page, where its screen timeout lives; Settings itself as a fallback. */
+    /**
+     * Samsung's cover screen timeout page; if this firmware doesn't have it (or no longer lets other apps open
+     * it), the Cover screen settings page, then Settings itself.
+     */
     private fun openCoverSettings() {
-        try {
-            startActivity(Intent(COVER_SETTINGS_ACTION))
-        } catch (e: Exception) { // not found on this firmware, or no longer open to other apps
-            startActivity(Intent(Settings.ACTION_SETTINGS))
+        for (action in listOf(COVER_TIMEOUT_ACTION, COVER_SETTINGS_ACTION, Settings.ACTION_SETTINGS)) {
+            try {
+                startActivity(Intent(action))
+                return
+            } catch (e: Exception) {
+                // try the next one
+            }
         }
     }
 
@@ -387,7 +374,9 @@ class MainActivity : Activity() {
 
     private companion object {
         const val REQUEST_NOTIFICATIONS = 1
-        /** Opens Samsung's Cover screen settings page (AOD app; exported, no permission needed). */
+        /** Samsung's cover screen timeout page (AOD app; exported, no permission needed). */
+        const val COVER_TIMEOUT_ACTION = "com.samsung.android.app.aodservice.settings.CoverScreenTimeoutSetting"
+        /** Samsung's Cover screen settings page (AOD app; exported, no permission needed). */
         const val COVER_SETTINGS_ACTION = "com.samsung.android.app.aodservice.intent.action.COVER_SCREEN_SETTING_INTERNAL"
     }
 }

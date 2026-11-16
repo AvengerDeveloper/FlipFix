@@ -37,7 +37,7 @@ Once unlocked while folded, FlipFix keeps your cover screen intact:
 | **Swipe right from left edge** | Returns from widgets back to your video, with the card sliding back in |
 | **Swipe up** | Opens Samsung Wallet |
 | **Swipe down from top edge** | Opens Samsung's native notification panel (FlipFix does not intercept it) |
-| **Leave it untouched** | The cover turns off after Samsung's cover screen timeout (**Settings → Cover screen → Screen timeout**), exactly as it does without FlipFix. The FlipFix app shows the current timeout and links straight to that setting |
+| **Leave it untouched** | The cover turns off after Samsung's cover screen timeout (**Settings → Cover screen → Clock style**), exactly as it does without FlipFix. **Screen timeout** in the FlipFix app opens that setting directly |
 | **Unfold the phone** | Automatically switches FlipFix's accessibility service off |
 
 ---
