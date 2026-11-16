@@ -7,14 +7,17 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.database.ContentObserver
 import android.graphics.Bitmap
 import android.hardware.display.DisplayManager
 import android.os.Handler
 import android.os.Looper
 import android.os.PowerManager
 import android.os.SystemClock
+import android.provider.Settings
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
+import java.util.Date
 
 /**
  * Opens the cover face on the cover display whenever Samsung's unlocked cover home would otherwise show:
@@ -63,11 +66,17 @@ class CoverAccessibilityService : AccessibilityService() {
                     CoverState.dismissed = false
                     maybeLaunch("unlocked")
                 }
-                Intent.ACTION_SCREEN_ON -> maybeLaunch("screen on")
+                Intent.ACTION_SCREEN_ON -> {
+                    maybeLaunch("screen on")
+                    scheduleLockScreenCheck()
+                }
                 Intent.ACTION_SCREEN_OFF -> {
                     CoverState.dismissed = false
                     handler.removeCallbacks(unlockPoll)
+                    handler.removeCallbacks(lockScreenCheck)
                     edge.hide()
+                    edge.releaseImages()
+                    CoverState.widgetsSnapshot = null
                 }
             }
         }
@@ -98,6 +107,49 @@ class CoverAccessibilityService : AccessibilityService() {
         edge.onExitFinished = { scheduleWidgetsCapture() }
         Log.i(CoverState.TAG, "accessibility service connected")
         maybeLaunch("service connected")
+        // The service is switched on as the cover lights up, often after SCREEN_ON was sent.
+        scheduleLockScreenCheck()
+        // A preset picked from the cover's long-press menu leaves the screen on: watch the switch itself.
+        runCatching {
+            contentResolver.registerContentObserver(
+                Settings.System.getUriFor(CoverFaceMatcher.PRESET_SETTING), false, presetObserver,
+            )
+        }
+    }
+
+    private val presetObserver = object : ContentObserver(handler) {
+        override fun onChange(selfChange: Boolean) {
+            Log.d(CoverState.TAG, "cover preset switched")
+            scheduleLockScreenCheck(PRESET_SWITCH_CHECK_DELAY_MS)
+        }
+    }
+
+    private val lockScreenCheck = Runnable { checkLockScreen() }
+
+    /** After a cover preset switch, have a look at Samsung's lock screen once it has drawn. */
+    private fun scheduleLockScreenCheck(delayMs: Long = LOCK_SCREEN_CHECK_DELAY_MS) {
+        if (!keyguardManager.isKeyguardLocked || !CoverFaceMatcher.needsCheck(this)) return
+        handler.removeCallbacks(lockScreenCheck)
+        handler.postDelayed(lockScreenCheck, delayMs)
+    }
+
+    /** One snapshot of Samsung's locked cover, compared with each preset's clock (CoverFaceMatcher). */
+    private fun checkLockScreen() {
+        if (!keyguardManager.isKeyguardLocked || CoverState.showing ||
+            !CoverState.isCoverOn(displayManager, powerManager) || !CoverFaceMatcher.needsCheck(this)
+        ) return
+        val stamp = CoverFaceMatcher.presetStamp(this)
+        capture { shot ->
+            when {
+                shot == null -> Log.d(CoverState.TAG, "cover preset check: no snapshot")
+                // Unlocked while the snapshot was taken: it may show the unlock animation, skip it.
+                !keyguardManager.isKeyguardLocked -> shot.recycle()
+                else -> {
+                    val at = Date()
+                    Thread { CoverFaceMatcher.match(applicationContext, shot, at, stamp) }.start()
+                }
+            }
+        }
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent) {
@@ -206,6 +258,7 @@ class CoverAccessibilityService : AccessibilityService() {
 
     override fun onDestroy() {
         handler.removeCallbacksAndMessages(null)
+        runCatching { contentResolver.unregisterContentObserver(presetObserver) }
         CoverState.exitAnimator = null
         CoverState.exitDrag = null
         edge.hide()
@@ -263,5 +316,9 @@ class CoverAccessibilityService : AccessibilityService() {
         const val UNLOCK_POLL_MS = 16L
         const val UNLOCK_POLL_WINDOW_MS = 2_000L
         const val RELAUNCH_GUARD_MS = 500L
+        /** Lets Samsung's lock screen finish waking from always-on display before the snapshot. */
+        const val LOCK_SCREEN_CHECK_DELAY_MS = 350L
+        /** After picking a preset, Samsung's picker closes and the lock screen redraws first. */
+        const val PRESET_SWITCH_CHECK_DELAY_MS = 1_500L
     }
 }

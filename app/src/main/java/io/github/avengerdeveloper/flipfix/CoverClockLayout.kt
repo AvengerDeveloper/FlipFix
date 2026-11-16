@@ -8,8 +8,9 @@ import android.util.Log
 import java.io.File
 
 /**
- * Which Samsung cover clock style the user has, read from the template Wallpaper & style renders next to
- * the cover wallpaper (/data/overlays/coverwallpaper/0/<id>/cover_clock.png).
+ * Which Samsung cover clock style a cover preset has, read from the template Wallpaper & style renders next
+ * to each preset's wallpaper (/data/overlays/coverwallpaper/0/<id>/cover_clock.png). Which preset is active
+ * is worked out by CoverFaceMatcher.
  *
  * The template is split into horizontal ink bands below the sample status icons:
  *  - one band            -> [Horizontal]: "13:49  Sun 15 November" on one line (Z Flip6 default)
@@ -45,8 +46,13 @@ sealed interface CoverClockLayout {
     data object Unknown : CoverClockLayout
 
     companion object {
-        private const val TEMPLATE_ROOT = "/data/overlays/coverwallpaper/0"
+        const val TEMPLATE_ROOT = "/data/overlays/coverwallpaper/0"
+        private const val TEMPLATE_NAME = "cover_clock.png"
         private const val INK_ALPHA = 60
+
+        /** Camera shortcut corner of the templates (left and top edges, as fractions). */
+        private const val CAMERA_LEFT = 0.80f
+        private const val CAMERA_TOP = 0.70f
 
         /**
          * Width Samsung's weather (gap + icon + temperature) takes after the date, per date ascender
@@ -62,18 +68,61 @@ sealed interface CoverClockLayout {
 
         const val DATE_LETTER_SPACING = -0.02f
 
-        fun load(): CoverClockLayout = runCatching { fromTemplate() }
-            .onFailure { Log.w(CoverState.TAG, "cover clock template unreadable", it) }
-            .getOrNull() ?: Unknown
+        /** The clock of the active cover preset (see CoverFaceMatcher), or [Unknown] for no clock. */
+        fun load(context: Context): CoverClockLayout {
+            val file = CoverFaceMatcher.activeTemplate(context) ?: return Unknown
+            return parse(file)
+        }
 
-        /** The template of the cover wallpaper set most recently. */
-        private fun templateFile(): File? = File(TEMPLATE_ROOT).listFiles()
-            ?.map { File(it, "cover_clock.png") }
+        /** Every cover preset's template (one folder per preset in Wallpaper & style). */
+        fun templates(): List<File> = File(TEMPLATE_ROOT).listFiles()
+            ?.map { File(it, TEMPLATE_NAME) }
             ?.filter { it.canRead() }
-            ?.maxByOrNull { it.lastModified() }
+            .orEmpty()
 
-        private fun fromTemplate(): CoverClockLayout {
-            val file = templateFile() ?: return Unknown.also { Log.w(CoverState.TAG, "no cover clock template") }
+        /** The template of the preset created or edited most recently (in this cover's shape). */
+        fun newestTemplate(context: Context): File? {
+            val size = coverSize(context)
+            return templates().filter { size == null || sameShape(it, size.first, size.second) }
+                .maxByOrNull { it.lastModified() }
+        }
+
+        /**
+         * Whether [file] was rendered for a cover of this shape. Presets carried over from another phone
+         * (e.g. a Flip6 backup restored on a Flip8) keep that phone's template, but Samsung lays them out
+         * differently on this cover, so their template doesn't say where the clock really is.
+         */
+        fun sameShape(file: File, coverW: Int, coverH: Int): Boolean {
+            val o = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeFile(file.path, o)
+            if (o.outWidth <= 0 || o.outHeight <= 0 || coverW <= 0 || coverH <= 0) return false
+            val template = o.outWidth.toFloat() / o.outHeight
+            val cover = coverW.toFloat() / coverH
+            return kotlin.math.abs(template / cover - 1f) < SHAPE_TOLERANCE
+        }
+
+        private fun coverSize(context: Context): Pair<Int, Int>? {
+            val dm = context.getSystemService(android.hardware.display.DisplayManager::class.java) ?: return null
+            val mode = CoverState.coverDisplay(dm)?.mode ?: return null
+            return mode.physicalWidth to mode.physicalHeight
+        }
+
+        private const val SHAPE_TOLERANCE = 0.03f
+
+        /** Parsed once per template file and modification time: presets rarely change, parsing is slow. */
+        private val parsed = java.util.concurrent.ConcurrentHashMap<String, Pair<Long, CoverClockLayout>>()
+
+        fun parse(file: File): CoverClockLayout {
+            val stamp = file.lastModified()
+            parsed[file.path]?.let { (at, layout) -> if (at == stamp) return layout }
+            val layout = runCatching { fromTemplate(file) }
+                .onFailure { Log.w(CoverState.TAG, "cover clock template unreadable: ${file.parentFile?.name}", it) }
+                .getOrNull() ?: Unknown
+            parsed[file.path] = stamp to layout
+            return layout
+        }
+
+        private fun fromTemplate(file: File): CoverClockLayout {
             val bmp = BitmapFactory.decodeFile(file.path) ?: return Unknown
             val w = bmp.width
             val h = bmp.height
@@ -84,7 +133,9 @@ sealed interface CoverClockLayout {
             // Ink bands below the sample status icons (top 10%); tiny gaps (dots, icons) are merged.
             val bands = t.bands(from = (h * 0.10f).toInt(), mergeGap = (h * 0.02f).toInt())
             val layout = when {
-                bands.size == 1 -> Horizontal(CoverClockStyle.fromBand(t, bands[0]) ?: return Unknown)
+                // A one-line clock is a thin band; a band filling the template is an illustrated face.
+                bands.size == 1 && bands[0].height < h * 0.2f ->
+                    Horizontal(CoverClockStyle.fromBand(t, bands[0]) ?: return Unknown)
                 bands.size == 2 && bands[1].height > bands[0].height * 1.8f -> stacked(t, bands[0], bands[1])
                 else -> Unknown
             }
@@ -125,7 +176,9 @@ sealed interface CoverClockLayout {
     /** Pixel helpers over the template. */
     class Template(private val px: IntArray, val w: Int, val h: Int) {
         fun alpha(x: Int, y: Int) = Color.alpha(px[y * w + x])
-        fun ink(x: Int, y: Int) = alpha(x, y) > INK_ALPHA
+
+        /** Clock ink; the camera shortcut Samsung draws in the bottom-right corner doesn't count. */
+        fun ink(x: Int, y: Int) = alpha(x, y) > INK_ALPHA && !(x > w * CAMERA_LEFT && y > h * CAMERA_TOP)
 
         fun bands(from: Int, mergeGap: Int): List<Band> {
             val out = mutableListOf<Band>()

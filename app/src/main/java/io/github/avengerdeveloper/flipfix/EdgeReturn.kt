@@ -92,6 +92,18 @@ class EdgeReturn(
         }
     }
 
+    /**
+     * Screen off: let go of the snapshots and the still. They only serve the swipe animations of the current
+     * session, and the next swipe-away takes fresh ones.
+     */
+    fun releaseImages() {
+        if (root != null) return
+        faceSnapshot = null
+        preparedFace = null
+        thumbnail = null
+        thumbnailFolder = null
+    }
+
     /** Remove the overlay, optionally after a delay. */
     fun hide(delayMs: Long = 0) {
         val view = root ?: return
@@ -123,16 +135,18 @@ class EdgeReturn(
 
     private fun stripWidth() = (STRIP_DP * density).toInt()
 
-    /** Samsung's still frame of the current cover video, next to the clock template. */
+    /** Folder the current [thumbnail] came from; the active preset may change. */
+    private var thumbnailFolder: String? = null
+
+    /** Samsung's still frame of the active preset's cover video, next to its clock template. */
     private fun loadThumbnailAsync() {
-        if (thumbnail != null) return
         Thread {
-            val file = File(COVER_WALLPAPER_ROOT).listFiles()
-                ?.map { File(it, "thumbnail.jpg") }
-                ?.filter { it.canRead() }
-                ?.maxByOrNull { it.lastModified() }
+            val file = CoverFaceMatcher.activeFolder(service)?.let { File(it, "thumbnail.jpg") }?.takeIf { it.canRead() }
+            val folder = file?.parentFile?.name
+            if (folder == thumbnailFolder && (thumbnail != null || folder == null)) return@Thread
             thumbnail = file?.let { BitmapFactory.decodeFile(it.path) }
-            Log.d(CoverState.TAG, "edge peek still: ${file?.parentFile?.name ?: "none"}")
+            thumbnailFolder = folder
+            Log.d(CoverState.TAG, "edge peek still: ${folder ?: "none"}")
         }.start()
     }
 
@@ -554,7 +568,6 @@ class EdgeReturn(
     }
 
     private companion object {
-        const val COVER_WALLPAPER_ROOT = "/data/overlays/coverwallpaper/0"
         const val STRIP_DP = 36f
         const val DRAG_DISTANCE_FRACTION = 0.6f // drag this share of the width for full progress
         const val COMMIT_PROGRESS = 0.33f
