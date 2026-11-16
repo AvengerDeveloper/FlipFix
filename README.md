@@ -49,7 +49,8 @@ AOD app (FlipFix ships none of them):
 | Anything else | | No clock (safety net), rather than a wrong one |
 
 Samsung's weather on the stacked style comes from a provider ordinary apps can't read, so FlipFix keeps the
-date where it is and leaves the weather's space empty.
+date where it is and leaves the weather's space empty. That's deliberate: fetching weather itself would mean
+internet and location permissions, and FlipFix has neither.
 
 The full investigation is in [`research/`](research/).
 
@@ -116,7 +117,6 @@ screen is built on your firmware. None of the tools change anything on the phone
 ## Roadmap
 
 - More Samsung clock styles (the one-line and stacked styles are matched today)
-- Weather on the stacked style
 - Pre-built APKs on GitHub Releases
 
 ## Disclaimer
