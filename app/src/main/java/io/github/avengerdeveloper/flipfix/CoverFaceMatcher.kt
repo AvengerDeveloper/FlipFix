@@ -34,8 +34,8 @@ object CoverFaceMatcher {
     private const val KEY_TRIES = "tries"
     private const val NO_STAMP = "?"
 
-    /** Checks per preset switch when nothing matches, before waiting for the next switch. */
-    private const val MAX_TRIES = 3
+    /** Wakes checked per preset switch when nothing matches, before waiting for the next switch. */
+    private const val MAX_TRIES = 5
 
     /** Without a readable [PRESET_SETTING], re-check at most this often. */
     private const val UNSTAMPED_RECHECK_MS = 10 * 60_000L
@@ -97,8 +97,10 @@ object CoverFaceMatcher {
     /**
      * Compares [shot] (Samsung's locked cover, taken at [at] while [stamp] was current) with every
      * preset's clock and records the active preset. Runs off the main thread; recycles [shot].
+     * [newTry]: the first snapshot of a wake (later snapshots of the same wake count as the same try).
+     * Returns whether another snapshot is worth taking (nothing matched, but some preset could have).
      */
-    fun match(context: Context, shot: Bitmap, at: Date, stamp: String) {
+    fun match(context: Context, shot: Bitmap, at: Date, stamp: String, newTry: Boolean): Boolean {
         val started = SystemClock.uptimeMillis()
         val coverW = shot.width
         val coverH = shot.height
@@ -139,7 +141,7 @@ object CoverFaceMatcher {
         val matched = best?.takeIf { it.second >= MIN_SCORE }?.first?.maxByOrNull { it.lastModified() }?.parentFile?.name
         val p = prefs(context)
         val sameSwitch = p.getString(KEY_STAMP, null) == stamp
-        val tries = if (sameSwitch) p.getInt(KEY_TRIES, 0) + 1 else 1
+        val tries = if (sameSwitch) p.getInt(KEY_TRIES, 0) + (if (newTry) 1 else 0) else 1
         p.edit()
             .putString(KEY_STAMP, stamp)
             .putString(KEY_FOLDER, matched.orEmpty())
@@ -157,6 +159,7 @@ object CoverFaceMatcher {
                 },
         )
         observers.forEach { it() }
+        return matched == null && byLayout.isNotEmpty()
     }
 
     /**

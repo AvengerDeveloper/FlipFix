@@ -126,19 +126,30 @@ class CoverAccessibilityService : AccessibilityService() {
 
     private val lockScreenCheck = Runnable { checkLockScreen() }
 
+    /** Snapshots taken since the cover woke (or the preset was switched). */
+    private var lockChecksThisWake = 0
+
     /** After a cover preset switch, have a look at Samsung's lock screen once it has drawn. */
     private fun scheduleLockScreenCheck(delayMs: Long = LOCK_SCREEN_CHECK_DELAY_MS) {
         if (!keyguardManager.isKeyguardLocked || !CoverFaceMatcher.needsCheck(this)) return
+        lockChecksThisWake = 0
         handler.removeCallbacks(lockScreenCheck)
         handler.postDelayed(lockScreenCheck, delayMs)
     }
 
-    /** One snapshot of Samsung's locked cover, compared with each preset's clock (CoverFaceMatcher). */
+    /**
+     * One snapshot of Samsung's locked cover, compared with each preset's clock (CoverFaceMatcher). Right
+     * after folding, Samsung's clock may still be animating in, so a miss is retried a little later
+     * (up to [LOCK_SCREEN_RECHECK_DELAYS_MS]) while the cover stays awake and locked.
+     */
     private fun checkLockScreen() {
         if (!keyguardManager.isKeyguardLocked || CoverState.showing ||
             !CoverState.isCoverOn(displayManager, powerManager) || !CoverFaceMatcher.needsCheck(this)
         ) return
         val stamp = CoverFaceMatcher.presetStamp(this)
+        val newTry = lockChecksThisWake == 0
+        val recheckIn = LOCK_SCREEN_RECHECK_DELAYS_MS.getOrNull(lockChecksThisWake)
+        lockChecksThisWake++
         capture { shot ->
             when {
                 shot == null -> Log.d(CoverState.TAG, "cover preset check: no snapshot")
@@ -146,7 +157,15 @@ class CoverAccessibilityService : AccessibilityService() {
                 !keyguardManager.isKeyguardLocked -> shot.recycle()
                 else -> {
                     val at = Date()
-                    Thread { CoverFaceMatcher.match(applicationContext, shot, at, stamp) }.start()
+                    Thread {
+                        val retry = CoverFaceMatcher.match(applicationContext, shot, at, stamp, newTry)
+                        if (retry && recheckIn != null) handler.post {
+                            // A newer wake or switch reset the count and scheduled its own check.
+                            if (lockChecksThisWake > 0 && !handler.hasCallbacks(lockScreenCheck)) {
+                                handler.postDelayed(lockScreenCheck, recheckIn)
+                            }
+                        }
+                    }.start()
                 }
             }
         }
@@ -318,6 +337,8 @@ class CoverAccessibilityService : AccessibilityService() {
         const val RELAUNCH_GUARD_MS = 500L
         /** Lets Samsung's lock screen finish waking from always-on display before the snapshot. */
         const val LOCK_SCREEN_CHECK_DELAY_MS = 350L
+        /** After a miss, look again this much later (second and third snapshot of a wake: ~1.2 s, ~2.5 s). */
+        val LOCK_SCREEN_RECHECK_DELAYS_MS = longArrayOf(850L, 1_300L)
         /** After picking a preset, Samsung's picker closes and the lock screen redraws first. */
         const val PRESET_SWITCH_CHECK_DELAY_MS = 1_500L
     }
