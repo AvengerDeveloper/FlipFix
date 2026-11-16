@@ -5,11 +5,13 @@ import android.app.ActivityOptions
 import android.app.WallpaperManager
 import android.content.Intent
 import android.os.Bundle
+import android.provider.Settings
 import android.util.Log
 import android.view.Display
 import android.view.GestureDetector
 import android.view.MotionEvent
 import android.view.View
+import android.view.WindowManager
 import android.view.WindowInsets
 import android.view.WindowInsetsController
 import java.lang.ref.WeakReference
@@ -52,6 +54,35 @@ class CoverActivity : Activity() {
         }
     }
 
+    /**
+     * Samsung's cover windows (lock screen, widget home, notification panel) each carry the cover screen's own
+     * timeout, Settings > Cover screen > Screen timeout, and Android uses it while they're on top. Without it the
+     * cover face would stay on for the main screen's timeout instead. Read on every resume, so a changed setting
+     * applies the next time the face shows.
+     */
+    private fun applyCoverTimeout() {
+        val seconds = try {
+            Settings.System.getInt(contentResolver, COVER_TIMEOUT_SETTING)
+        } catch (e: Exception) {
+            Log.w(CoverState.TAG, "cover timeout unreadable, using the main screen's: $e")
+            return
+        }
+        if (seconds <= 0) return
+        val millis = seconds * 1000L
+        try {
+            // Hidden field, the same one Samsung's windows set; there is no public API for it.
+            val field = WindowManager.LayoutParams::class.java.getField("userActivityTimeout")
+            val attrs = window.attributes
+            if (field.getLong(attrs) != millis) {
+                field.setLong(attrs, millis)
+                window.attributes = attrs
+            }
+            Log.d(CoverState.TAG, "cover timeout ${seconds}s")
+        } catch (e: Exception) {
+            Log.w(CoverState.TAG, "cover timeout not applied: $e")
+        }
+    }
+
     override fun onResume() {
         super.onResume()
         if (display?.displayId == Display.DEFAULT_DISPLAY || !CoverState.isEnabled(this)) {
@@ -67,6 +98,7 @@ class CoverActivity : Activity() {
         // Tell the edge peek once this face is really on screen, so its card can fade out on top of it.
         window.decorView.viewTreeObserver.registerFrameCommitCallback { CoverState.notifyFaceShown() }
         hideNavigationBar()
+        applyCoverTimeout()
         clock.invalidate()
         clock.reloadStyleAsync()
         window.decorView.post { resumeVideo("resumed") }
@@ -226,6 +258,8 @@ class CoverActivity : Activity() {
 
     private companion object {
         const val CMD_RESUME = "samsung.android.wallpaper.resume"
+        /** Samsung's cover-screen timeout, in seconds. */
+        const val COVER_TIMEOUT_SETTING = "cover_screen_timeout"
         const val WALLET = "com.samsung.android.spay"
         const val MIN_SWIPE_DP = 48
         const val EXIT_COMMIT_PROGRESS = 0.33f
