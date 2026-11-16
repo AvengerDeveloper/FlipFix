@@ -67,7 +67,19 @@ class CoverClockView @JvmOverloads constructor(
         CoverFaceMatcher.observe(presetObserver)
     }
 
+    /** An analog clock with a second hand redraws on every second while it's on screen. */
+    private val secondTick = Runnable { invalidate() }
+
+    private fun scheduleSecondTick() {
+        removeCallbacks(secondTick)
+        val l = layout
+        if (l is CoverClockLayout.Analog && l.second != null) {
+            postDelayed(secondTick, 1_000L - System.currentTimeMillis() % 1_000L + 5L)
+        }
+    }
+
     override fun onDetachedFromWindow() {
+        removeCallbacks(secondTick)
         CoverFaceMatcher.stopObserving(presetObserver)
         runCatching { context.unregisterReceiver(tick) }
         super.onDetachedFromWindow()
@@ -92,5 +104,7 @@ class CoverClockView @JvmOverloads constructor(
             val h = height.toFloat()
             renderer.draw(canvas, layout, Date(), w, h, -shift.first * w, -shift.second * h)
         }
+        // Only a drawn frame schedules the next one: off screen, the ticking stops by itself.
+        scheduleSecondTick()
     }
 }

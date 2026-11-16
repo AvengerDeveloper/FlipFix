@@ -15,6 +15,7 @@ import java.io.File
  * The template is split into horizontal ink bands below the sample status icons:
  *  - one band            -> [Horizontal]: "13:49  Sun 15 November" on one line (Z Flip6 default)
  *  - small band over big -> [Stacked]: "Mon 16 Nov  (weather)" over huge rounded digits (Z Flip8 default)
+ *  - otherwise, in turn  -> [TwoLine] (hours over minutes), [Sideways], [Analog] (a dial with hands)
  *  - anything else       -> [Unknown]: FlipFix draws no clock rather than a wrong one (safety net)
  */
 sealed interface CoverClockLayout {
@@ -107,6 +108,43 @@ sealed interface CoverClockLayout {
         val color: Int,
         val dateColor: Int,
     ) : CoverClockLayout
+
+    /**
+     * An analog dial (read by CoverClockAnalog). [dial] is the template's own dial (numerals or ticks) with
+     * the sample hands taken out, drawn over the cover rect given by the dial fractions; the hands are drawn
+     * live around the centre. Hand sizes and the pin are fractions of the cover height.
+     */
+    data class Analog(
+        val dial: android.graphics.Bitmap,
+        val dialLeftFrac: Float,
+        val dialTopFrac: Float,
+        val dialRightFrac: Float,
+        val dialBottomFrac: Float,
+        val centerXFrac: Float,
+        val centerYFrac: Float,
+        val hour: Hand,
+        val minute: Hand,
+        /** Null when the style has no second hand. */
+        val second: Hand?,
+        val pinRadiusFrac: Float,
+        val color: Int,
+        val secondColor: Int,
+        val pinColor: Int,
+        val date: DateLine?,
+    ) : CoverClockLayout
+
+    /** A clock hand from the centre to its round tip ([lengthFrac]); a tail behind the centre if any. */
+    data class Hand(val lengthFrac: Float, val widthFrac: Float, val tailFrac: Float = 0f, val tailWidthFrac: Float = 0f)
+
+    /** A date line ("Wed 1 February" or "Wed 1 Feb"), its ink anchored at [anchorXFrac] by [align]. */
+    data class DateLine(
+        val longMonth: Boolean,
+        val align: Align,
+        val anchorXFrac: Float,
+        val textSizeFrac: Float,
+        val baselineFrac: Float,
+        val color: Int,
+    )
 
     data object Unknown : CoverClockLayout
 
@@ -204,7 +242,8 @@ sealed interface CoverClockLayout {
                 bands.size == 2 && bands[1].height > bands[0].height * 1.8f ->
                     stacked(context, t, bands[0], bands[1], "${file.path}@${file.lastModified()}")
                 else -> twoLine(context, t, "${file.path}@${file.lastModified()}").takeIf { it != Unknown }
-                    ?: sideways(context, t, "${file.path}@${file.lastModified()}")
+                    ?: sideways(context, t, "${file.path}@${file.lastModified()}").takeIf { it != Unknown }
+                    ?: CoverClockAnalog.parse(t)
             }
             Log.d(CoverState.TAG, "cover clock from ${file.parentFile?.name}: bands=$bands -> $layout")
             return layout
@@ -262,7 +301,7 @@ sealed interface CoverClockLayout {
             return fontClock(context, t, font, listOf(SAMPLE_HOURS to hoursRect, SAMPLE_MINUTES to minutesRect), dateRect)
         }
 
-        private fun alignOf(centerX: Float, width: Int) = when {
+        internal fun alignOf(centerX: Float, width: Int) = when {
             kotlin.math.abs(centerX - width / 2f) < width * 0.02f -> Align.CENTER
             centerX < width / 2f -> Align.LEFT
             else -> Align.RIGHT
@@ -320,13 +359,13 @@ sealed interface CoverClockLayout {
             )
         }
 
-        private class DateFields(val long: Boolean, val anchor: Float, val size: Float, val baseline: Float, val color: Int)
+        internal class DateFields(val long: Boolean, val anchor: Float, val size: Float, val baseline: Float, val color: Int)
 
         /**
          * The date line at [rect]: sample "Wed 1 February" or "Wed 1 Feb" (whichever has its proportions),
          * sized by its ink height (system stand-in font), anchored by its ink like the clock ([align]).
          */
-        private fun dateFields(t: Template, rect: android.graphics.Rect, align: Align, fallbackColor: Int): DateFields? {
+        internal fun dateFields(t: Template, rect: android.graphics.Rect, align: Align, fallbackColor: Int): DateFields? {
             if (rect.height() <= 0) return null
             val r = android.graphics.Rect()
             val datePaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
@@ -513,7 +552,22 @@ sealed interface CoverClockLayout {
         fun sample(text: String, rect: android.graphics.Rect) = CoverClockFonts.sample(text, px, w, rect, INK_ALPHA)
 
         /** Clock ink; the camera shortcut Samsung draws in the bottom-right corner doesn't count. */
-        fun ink(x: Int, y: Int) = alpha(x, y) > INK_ALPHA && !(cameraCorner && x > w * CAMERA_LEFT && y > h * CAMERA_TOP)
+        fun ink(x: Int, y: Int) = alpha(x, y) > INK_ALPHA && !inCameraCorner(x, y)
+
+        fun inCameraCorner(x: Int, y: Int) = cameraCorner && x > w * CAMERA_LEFT && y > h * CAMERA_TOP
+
+        /** Mostly opaque clock ink (inside shapes rather than their soft edges). */
+        fun solid(x: Int, y: Int) = alpha(x, y) > 127 && !inCameraCorner(x, y)
+
+        /** Clock-ink opacity (0..1) at a point between pixel centres, interpolated; 0 off the template. */
+        fun alphaAt(x: Float, y: Float): Float {
+            val x0 = kotlin.math.floor(x).toInt(); val y0 = kotlin.math.floor(y).toInt()
+            val fx = x - x0; val fy = y - y0
+            fun a(px: Int, py: Int) =
+                if (px !in 0 until w || py !in 0 until h || inCameraCorner(px, py)) 0f else alpha(px, py) / 255f
+            return a(x0, y0) * (1 - fx) * (1 - fy) + a(x0 + 1, y0) * fx * (1 - fy) +
+                a(x0, y0 + 1) * (1 - fx) * fy + a(x0 + 1, y0 + 1) * fx * fy
+        }
 
         fun bands(from: Int, mergeGap: Int): List<Band> {
             val out = mutableListOf<Band>()

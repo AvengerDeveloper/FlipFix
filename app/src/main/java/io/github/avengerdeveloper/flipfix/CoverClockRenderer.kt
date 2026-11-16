@@ -5,8 +5,10 @@ import android.graphics.Canvas
 import android.graphics.LinearGradient
 import android.graphics.Paint
 import android.graphics.Rect
+import android.graphics.RectF
 import android.graphics.Shader
 import android.text.format.DateFormat
+import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 
@@ -53,8 +55,73 @@ class CoverClockRenderer(private val context: Context) {
             is CoverClockLayout.Stacked -> drawStacked(canvas, layout, now, locale, screenW, screenH, offX, offY)
             is CoverClockLayout.TwoLine -> drawTwoLine(canvas, layout, now, locale, screenW, screenH, offX, offY)
             is CoverClockLayout.Sideways -> drawSideways(canvas, layout, now, locale, screenW, screenH, offX, offY)
+            is CoverClockLayout.Analog -> drawAnalog(canvas, layout, now, locale, screenW, screenH, offX, offY)
             CoverClockLayout.Unknown -> Unit
         }
+    }
+
+    private val dialPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+    private val dialRect = RectF()
+    private val handPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND }
+    private val secondHandPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND }
+    private val pinPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val calendar = Calendar.getInstance()
+
+    /**
+     * Analog dial: the template's own numerals (or ticks), then the hands for [now] (hour and minute hands
+     * move continuously, the second hand ticks), then the date line.
+     */
+    private fun drawAnalog(
+        canvas: Canvas, l: CoverClockLayout.Analog, now: Date, locale: Locale,
+        screenW: Float, screenH: Float, offX: Float, offY: Float,
+    ) {
+        dialRect.set(
+            l.dialLeftFrac * screenW - offX, l.dialTopFrac * screenH - offY,
+            l.dialRightFrac * screenW - offX, l.dialBottomFrac * screenH - offY,
+        )
+        canvas.drawBitmap(l.dial, null, dialRect, dialPaint)
+
+        calendar.timeZone = java.util.TimeZone.getDefault()
+        calendar.time = now
+        val seconds = calendar.get(Calendar.SECOND)
+        val minutes = calendar.get(Calendar.MINUTE) + seconds / 60f
+        val hours = calendar.get(Calendar.HOUR) + minutes / 60f
+        handPaint.color = l.color or 0xFF000000.toInt()
+        secondHandPaint.color = l.secondColor or 0xFF000000.toInt()
+        pinPaint.color = l.pinColor or 0xFF000000.toInt()
+        CoverClockAnalog.drawHands(
+            canvas, l.hour, l.minute, l.second, l.pinRadiusFrac,
+            l.centerXFrac * screenW - offX, l.centerYFrac * screenH - offY, screenH,
+            hours * 30f, minutes * 6f, seconds * 6f, handPaint, secondHandPaint, pinPaint,
+        )
+
+        l.date?.let { d ->
+            drawDateLine(
+                canvas, now, locale, d.longMonth, d.align, d.anchorXFrac, d.textSizeFrac, d.baselineFrac, d.color,
+                screenW, screenH, offX, offY,
+            )
+        }
+    }
+
+    /** A date line whose ink is anchored at [anchorXFrac] by [align] (as the template has it). */
+    private fun drawDateLine(
+        canvas: Canvas, now: Date, locale: Locale, longMonth: Boolean, align: CoverClockLayout.Align,
+        anchorXFrac: Float, textSizeFrac: Float, baselineFrac: Float, color: Int,
+        screenW: Float, screenH: Float, offX: Float, offY: Float,
+    ) {
+        val dateText = DateFormat.format(
+            DateFormat.getBestDateTimePattern(locale, if (longMonth) "EEEdMMMM" else "EEEdMMM"), now,
+        ).toString()
+        lineDatePaint.textSize = textSizeFrac * screenH
+        lineDatePaint.color = color or 0xFF000000.toInt()
+        lineDatePaint.getTextBounds(dateText, 0, dateText.length, bounds)
+        val anchor = anchorXFrac * screenW
+        val x = when (align) {
+            CoverClockLayout.Align.LEFT -> anchor - bounds.left
+            CoverClockLayout.Align.CENTER -> anchor - (bounds.left + bounds.right) / 2f
+            CoverClockLayout.Align.RIGHT -> anchor - bounds.right
+        }
+        canvas.drawText(dateText, x - offX, baselineFrac * screenH - offY, lineDatePaint)
     }
 
     private val twoLinePaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.SUBPIXEL_TEXT_FLAG)
@@ -147,19 +214,10 @@ class CoverClockRenderer(private val context: Context) {
             }
         }
 
-        val dateText = DateFormat.format(
-            DateFormat.getBestDateTimePattern(locale, if (l.dateLongMonth) "EEEdMMMM" else "EEEdMMM"), now,
-        ).toString()
-        lineDatePaint.textSize = l.dateTextSizeFrac * screenH
-        lineDatePaint.color = l.dateColor or 0xFF000000.toInt()
-        lineDatePaint.getTextBounds(dateText, 0, dateText.length, bounds)
-        val dateAnchor = l.dateAnchorXFrac * screenW
-        val dateX = when (l.align) {
-            CoverClockLayout.Align.LEFT -> dateAnchor - bounds.left
-            CoverClockLayout.Align.CENTER -> dateAnchor - (bounds.left + bounds.right) / 2f
-            CoverClockLayout.Align.RIGHT -> dateAnchor - bounds.right
-        }
-        canvas.drawText(dateText, dateX - offX, l.dateBaselineFrac * screenH - offY, lineDatePaint)
+        drawDateLine(
+            canvas, now, locale, l.dateLongMonth, l.align, l.dateAnchorXFrac, l.dateTextSizeFrac, l.dateBaselineFrac,
+            l.dateColor, screenW, screenH, offX, offY,
+        )
     }
 
     /**

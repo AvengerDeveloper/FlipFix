@@ -28,7 +28,7 @@ android {
         applicationId = "io.github.avengerdeveloper.flipfix"
         minSdk = 33
         targetSdk = 37
-        // CI sets these from the build number and the release tag (v1.2.3 -> 1.2.3).
+        // CI sets these from the release tag (v1.2.3 -> 1.2.3, code 1020300); test builds pass a code in between.
         versionCode = System.getenv("FLIPFIX_VERSION_CODE")?.toIntOrNull() ?: 1
         versionName = System.getenv("FLIPFIX_VERSION_NAME") ?: "0.1.0"
     }

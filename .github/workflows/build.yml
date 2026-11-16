@@ -57,10 +57,11 @@ jobs:
           export FLIPFIX_KEY_ALIAS="$(clean "$KEY_ALIAS")"
           export FLIPFIX_KEY_PASSWORD="$(clean "$KEY_PASSWORD")"
           export FLIPFIX_VERSION_NAME="${GITHUB_REF_NAME#v}"
-          # Version code from the tag (v1.2.3 -> 10203), not the run number: it only ever goes up with the
-          # version, and stays above the codes of local test builds, so phones can always update to a release.
+          # Version code from the tag (v1.2.3 -> 1020300), not the run number: it only ever goes up with the
+          # version, and leaves room below each release (10501, 10502...) for test builds between v0.1.5 and
+          # v0.1.6 (10600), so phones can always update to a release.
           IFS=. read -r major minor patch <<< "$FLIPFIX_VERSION_NAME"
-          export FLIPFIX_VERSION_CODE="$(( major * 10000 + minor * 100 + ${patch%%[!0-9]*} ))"
+          export FLIPFIX_VERSION_CODE="$(( (major * 10000 + minor * 100 + ${patch%%[!0-9]*}) * 100 ))"
           ./gradlew :app:assembleRelease --no-daemon
           # Same file name in every release, so releases/latest/download/FlipFix.apk always works.
           apk="FlipFix.apk"
