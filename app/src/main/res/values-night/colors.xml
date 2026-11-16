@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Settings screen (dark): near-black page, raised cards, as in One UI's own Settings. -->
+    <color name="ff_background">#FF050506</color>
+    <color name="ff_card">#FF1A1A1D</color>
+    <color name="ff_divider">#1FFFFFFF</color>
+    <color name="ff_text">#FFF4F4F6</color>
+    <color name="ff_text_secondary">#FFA1A1AA</color>
+    <color name="ff_accent">#FF5C9BFF</color>
+    <color name="ff_ok">#FF5C9BFF</color>
+    <color name="ff_needed">#FFFFA24C</color>
+    <color name="ff_danger">#FFFF6B60</color>
+    <color name="ff_ripple">#24FFFFFF</color>
+</resources>

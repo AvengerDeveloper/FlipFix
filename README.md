@@ -57,8 +57,10 @@ The full investigation is in [`research/`](research/).
 ### Why an accessibility service, and why it turns itself off
 
 Android only lets an app open a screen from the background in a few cases; an accessibility service is one of
-them. FlipFix's service listens only for "which window is on top" changes. It **never reads screen content**,
-and FlipFix has **no internet permission**.
+them. FlipFix's service listens only for "which window is on top" changes and **never reads screen content**
+(text or UI of other apps). For the swipe animations it takes snapshots of the cover screen (FlipFix's own face
+and Samsung's widget screen); they stay in memory, are never saved, and are replaced on the next swipe.
+FlipFix has **no internet permission**, so nothing leaves your phone.
 
 Many banking apps refuse to run while any accessibility service is on. So FlipFix switches its service **on
 only while the cover screen is on** and **off the moment you open the phone**. Banking apps on the main

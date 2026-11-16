@@ -5,6 +5,16 @@
       SubHomeActivity and makes FlipFix the cover display's wallpaper target. No window animations,
       so the hand-over from Samsung's lock screen is instant.
     -->
+    <!-- Main-screen settings page: own large title (no action bar), page colour edge to edge. -->
+    <style name="Theme.FlipFix.Settings" parent="@android:style/Theme.DeviceDefault.DayNight">
+        <item name="android:windowActionBar">false</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowBackground">@color/ff_background</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:colorAccent">@color/ff_accent</item>
+    </style>
+
     <style name="Theme.FlipFix.Cover" parent="@android:style/Theme.DeviceDefault.Wallpaper.NoTitleBar">
         <item name="android:windowShowWallpaper">true</item>
         <item name="android:windowBackground">@android:color/transparent</item>

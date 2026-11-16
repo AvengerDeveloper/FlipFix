@@ -1,4 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <color name="launcher_background">#FF26202A</color>
+
+    <!-- Settings screen (light). Dark values in values-night. One UI-style grouped cards. -->
+    <color name="ff_background">#FFF2F2F5</color>
+    <color name="ff_card">#FFFFFFFF</color>
+    <color name="ff_divider">#14000000</color>
+    <color name="ff_text">#FF101012</color>
+    <color name="ff_text_secondary">#FF6B6B73</color>
+    <color name="ff_accent">#FF2F6BDE</color>
+    <color name="ff_ok">#FF2F6BDE</color>
+    <color name="ff_needed">#FFC4580E</color>
+    <color name="ff_danger">#FFC8322B</color>
+    <color name="ff_ripple">#1F000000</color>
 </resources>
