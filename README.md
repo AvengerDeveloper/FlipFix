@@ -18,15 +18,14 @@ Samsung's One UI 9 update changed the cover screen on the Galaxy Z Flip. Now, th
 
 ### What works after installing?
 * **Your video keeps playing** after you unlock — using the exact video you already set in Samsung's Wallpaper settings.
-* **Your clock, notifications, and music controls** stay in their exact spots.
+* **Your notifications and music controls** stay in their exact spots, and so does **your clock** for the clock styles FlipFix can draw so far (other styles show no clock rather than a wrong one).
 * **Swipe left or right** to see your Samsung widgets; **swipe back** to return to your video.
 * **Swipe down from the top** for your normal notifications and quick settings.
-* **Double-press the power button** anytime to open the cover camera.
 * **Open your phone** and FlipFix turns itself off automatically.
 
 ### Is it safe?
 * **100% offline:** FlipFix has no internet access, so nothing ever leaves your phone.
-* **Private:** It never reads your messages, passwords, or screen content.
+* **Private:** Nothing is saved or sent. FlipFix looks at your notifications only to show their icons and your music player, and the quick snapshots it takes of the cover screen (for the swipe animations and to recognise your cover style) stay in memory and are thrown away.
 * **Banking-friendly:** Because FlipFix turns itself off the moment you unfold your phone, banking apps work normally without complaining.
 
 ### How to install (takes ~3 minutes)
@@ -126,7 +125,7 @@ FlipFix is built to stay out of the way and keep everything strictly on-device.
 ### Permissions FlipFix Does Not Use
 
 * **No Internet (`INTERNET`):** Completely offline — no telemetry, no crash reporting, and nothing ever leaves your phone.
-* **No Storage or Media access:** Never reads or writes files on your device.
+* **No Storage or Media access:** Never touches your photos, files or downloads. The only files it reads are Samsung's cover-screen templates and video thumbnails, which any app can read.
 * **No Location, Camera, Microphone, or Contacts:** Requests zero personal sensor or account permissions.
 
 ### Banking App Protection
