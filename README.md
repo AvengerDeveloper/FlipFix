@@ -75,30 +75,31 @@ app's name looks financial. A **Quick Settings tile** switches FlipFix on or off
 
 - Galaxy Z Flip on **One UI 9** (tested: Z Flip6 `SM-F741B` and Z Flip8 `SM-F776B`, One UI 9.0 / Android 17).
   Flip 5 / 7 should behave the same; reports welcome.
-- A PC with [Android SDK Platform-Tools](https://developer.android.com/tools/releases/platform-tools)
-  (`adb`) for the one-time setup, and Android Studio or a JDK to build.
+- `adb` once, for one permission: [Android SDK Platform-Tools](https://developer.android.com/tools/releases/platform-tools)
+  on a computer, or an on-phone ADB app using **Wireless debugging** (no computer needed).
 
 ## Install
 
-1. On the phone: **Settings → About phone → Software information**, tap **Build number** 7 times, then
-   **Settings → Developer options → USB debugging** on. Connect the USB cable and allow the prompt.
-2. Build and install:
+1. Download the latest **`FlipFix-vX.Y.Z.apk`** from [Releases](../../releases).
+2. Turn on **USB debugging** (or **Wireless debugging**): **Settings → About phone → Software information**,
+   tap **Build number** 7 times, then **Settings → Developer options**.
+3. Install it and grant the one permission Android only allows over ADB:
    ```bash
-   ./gradlew :app:installDebug
-   ```
-3. Grant the two permissions (one time):
-   ```bash
+   adb install FlipFix-vX.Y.Z.apk
    adb shell pm grant io.github.avengerdeveloper.flipfix android.permission.WRITE_SECURE_SETTINGS
-   adb shell cmd notification allow_listener io.github.avengerdeveloper.flipfix/io.github.avengerdeveloper.flipfix.FlipNotificationListener
    ```
-   (Notification access can also be given in **Settings → Notifications → Device & app notifications**.)
-4. Fold the phone, unlock — your video stays.
+4. Open **FlipFix** and tap anything marked in orange: **Notification access** opens the right settings page,
+   and **Notifications** asks once. Add the **Quick Settings tile** from there too.
+5. Fold the phone, unlock — your video stays.
 
-There is no need to turn the accessibility service on by hand; FlipFix manages it. Open the FlipFix app on
-the main screen to check status or switch it off.
+There is no need to turn the accessibility service on by hand; FlipFix manages it.
 
-> Installing with `adb` avoids Android's "restricted settings" block, which applies to apps sideloaded from
-> a browser or file manager.
+> Installed the APK from the phone (browser or file manager) instead of `adb install`? Android may block
+> notification access for it ("restricted setting"). Open **Settings → Apps → FlipFix → ⋮ → Allow restricted
+> settings**, then grant it.
+
+**Build from source** instead: `./gradlew :app:installDebug` (Android Studio or JDK 21). Every push to `main`
+also builds a debug APK on GitHub Actions; tags like `v1.2.3` publish a signed release.
 
 ## Troubleshooting
 
