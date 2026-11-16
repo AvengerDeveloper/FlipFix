@@ -340,6 +340,6 @@ class CoverAccessibilityService : AccessibilityService() {
         /** After a miss, look again this much later (second and third snapshot of a wake: ~1.2 s, ~2.5 s). */
         val LOCK_SCREEN_RECHECK_DELAYS_MS = longArrayOf(850L, 1_300L)
         /** After picking a preset, Samsung's picker closes and the lock screen redraws first. */
-        const val PRESET_SWITCH_CHECK_DELAY_MS = 1_500L
+        const val PRESET_SWITCH_CHECK_DELAY_MS = 700L
     }
 }

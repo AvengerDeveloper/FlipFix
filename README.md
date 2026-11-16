@@ -96,13 +96,17 @@ FlipFix reverses that handoff in three steps:
 ### Runtime Clock Matching (Zero Bundled Samsung Assets)
 When you customize your cover face in **Wallpaper & style**, Samsung saves a rendered template (`cover_clock.png`) for each cover preset. FlipFix inspects those templates to detect each preset's clock layout, coordinates, size, and color, then draws it at runtime using assets loaded directly from Samsung's Always On Display (AOD) package (FlipFix ships none of Samsung's proprietary fonts or graphics).
 
-**Switching presets** (long-press the locked cover): nothing an app can read says which preset is active, so after each switch FlipFix looks at Samsung's locked cover (up to three snapshots a wake, a second or two apart, while Samsung's clock animates in), draws each preset's clock offscreen for that minute, and uses the one that lands on Samsung's pixels. If none does, the face shows no clock rather than a wrong one. Presets carried over from another phone (e.g. a Flip6 backup on a Flip8) keep that phone's template, which Samsung lays out differently, so they show no clock; making the preset again on this phone fixes that.
+**Switching presets** (long-press the locked cover): nothing an app can read says which preset is active, so after each switch FlipFix looks at Samsung's locked cover (up to three snapshots a wake, a second or two apart, while Samsung's clock animates in), draws each preset's clock offscreen for that minute, and uses the one that lands on Samsung's pixels (allowing a small offset, since Samsung's lock screen sometimes places a clock a few pixels from where the template has it, and remembering that offset). FlipFix needs one such look per switch: if you unlock before it gets one, it looks again the next time the cover wakes locked. If none matches, the face shows no clock rather than a wrong one. Presets carried over from another phone (e.g. a Flip6 backup on a Flip8) keep that phone's template, which Samsung lays out differently, so they show no clock; making the preset again on this phone fixes that.
 
 | Clock Style | Typical Device | How FlipFix Renders It |
 | :--- | :--- | :--- |
 | **Single-line** (`13:49  Sun 15 November`) | Z Flip6 | Samsung's `ClockModex` system font |
-| **Stacked** (date over large rounded digits) | Z Flip8 | Samsung's own digit vector paths (`big_clock_num_*`), stroked as rounded lines |
-| **Hours over minutes** (`12` over `45`, date above or below, left, centred or right) | Z Flip8 | Samsung's clock fonts from the AOD app; FlipFix works out the font and weight by comparing each one with the preset's template |
+| **Stacked** (date over large digits) | Z Flip8 | Samsung's own digit vector paths (`big_clock_num_*`), stroked as rounded lines at the template's thickness, or the preset's clock font when it uses one |
+| **Hours over minutes** (`12` over `45`, date above or below, left, centred or right) | Z Flip8 | Samsung's clock fonts, or its rounded or layered digit paths (`layered_clock_num_*`), whichever matches the template |
+| **Sideways** (`Wed 1 February 12:45` reading upwards) | Z Flip8 | Samsung's clock font for the time; the date in a close system font |
+| **Analog** | Z Flip8 | Not drawn yet (no clock shown) |
+
+FlipFix works out which font, weight, digit set and thickness a preset uses by drawing each candidate and comparing it with the preset's template, once per preset.
 | **Any other style** | — | Hides the clock as a safe fallback rather than rendering a mismatched layout |
 
 > **Why is the weather space empty on the stacked clock?** Samsung pulls cover-screen weather from a private system provider that standard apps cannot read. Rather than requesting internet and location permissions to fetch third-party weather, FlipFix keeps the date in its exact original position and leaves the weather slot clean.

@@ -3,9 +3,7 @@ package io.github.avengerdeveloper.flipfix
 import android.content.Context
 import android.graphics.Canvas
 import android.graphics.LinearGradient
-import android.graphics.Matrix
 import android.graphics.Paint
-import android.graphics.Path
 import android.graphics.Rect
 import android.graphics.Shader
 import android.text.format.DateFormat
@@ -18,16 +16,13 @@ import java.util.Locale
  */
 class CoverClockRenderer(private val context: Context) {
 
-    // Stacked style (Z Flip8 default): Samsung's path-drawn digits under a date line.
-    private val samsungDigits by lazy { SamsungClockDigits.load(context) }
+    // Samsung's path-drawn digits (SamsungClockDigits), stroked as round lines.
     private val digitStrokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
         strokeCap = Paint.Cap.ROUND
         strokeJoin = Paint.Join.ROUND
     }
     private val dotPaint = Paint(Paint.ANTI_ALIAS_FLAG)
-    private val digitPath = Path()
-    private val digitMatrix = Matrix()
     private val lineDatePaint by lazy {
         Paint(Paint.ANTI_ALIAS_FLAG or Paint.SUBPIXEL_TEXT_FLAG).apply {
             typeface = CoverClockLayout.stackedDateTypeface()
@@ -57,32 +52,99 @@ class CoverClockRenderer(private val context: Context) {
             is CoverClockLayout.Horizontal -> drawHorizontal(canvas, layout.style, now, locale, screenW, screenH, offX, offY)
             is CoverClockLayout.Stacked -> drawStacked(canvas, layout, now, locale, screenW, screenH, offX, offY)
             is CoverClockLayout.TwoLine -> drawTwoLine(canvas, layout, now, locale, screenW, screenH, offX, offY)
+            is CoverClockLayout.Sideways -> drawSideways(canvas, layout, now, locale, screenW, screenH, offX, offY)
             CoverClockLayout.Unknown -> Unit
         }
     }
 
     private val twoLinePaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.SUBPIXEL_TEXT_FLAG)
+    private val sideDatePaint by lazy {
+        Paint(Paint.ANTI_ALIAS_FLAG or Paint.SUBPIXEL_TEXT_FLAG).apply { typeface = CoverClockStyle.dateTypeface() }
+    }
+    private val dateBounds = Rect()
+
+    /**
+     * The one-line clock on its side, reading upwards: drawn upright in the line's own frame (x up the
+     * cover, y across it from the left), then turned a quarter left onto the cover.
+     */
+    private fun drawSideways(
+        canvas: Canvas, l: CoverClockLayout.Sideways, now: Date, locale: Locale,
+        screenW: Float, screenH: Float, offX: Float, offY: Float,
+    ) {
+        val tf = CoverClockFonts.typeface(context, l.timeFont, l.timeWeight) ?: return
+        val timeText = DateFormat.format(timePattern(locale), now).toString()
+        val dateText = DateFormat.format(
+            DateFormat.getBestDateTimePattern(locale, if (l.dateLongMonth) "EEEdMMMM" else "EEEdMMM"), now,
+        ).toString()
+        twoLinePaint.typeface = tf
+        twoLinePaint.textSize = l.timeTextSizeFrac * screenH
+        twoLinePaint.color = l.color or 0xFF000000.toInt()
+        twoLinePaint.getTextBounds(timeText, 0, timeText.length, bounds)
+        sideDatePaint.textSize = l.dateTextSizeFrac * screenH
+        sideDatePaint.textScaleX = l.dateScaleX
+        sideDatePaint.color = l.dateColor or 0xFF000000.toInt()
+        sideDatePaint.getTextBounds(dateText, 0, dateText.length, dateBounds)
+
+        // Upright frame: as long as the cover is tall, as tall as the cover is wide.
+        val anchor = l.anchorFrac * screenH
+        val gap = l.gapFrac * screenH
+        val timeX: Float
+        val dateX: Float
+        if (l.timeFirst) {
+            timeX = anchor - bounds.left
+            dateX = timeX + bounds.right + gap - dateBounds.left
+        } else {
+            timeX = anchor - bounds.right
+            dateX = timeX + bounds.left - gap - dateBounds.right
+        }
+        canvas.save()
+        // Upright (x, y) -> cover (y, screenH - x).
+        canvas.translate(-offX, screenH - offY)
+        canvas.rotate(-90f)
+        canvas.drawText(timeText, timeX, l.timeBaselineFrac * screenW, twoLinePaint)
+        canvas.drawText(dateText, dateX, l.dateBaselineFrac * screenW, sideDatePaint)
+        canvas.restore()
+    }
 
     /** Hours over minutes in the preset's AOD font, with the date line where the template has it. */
     private fun drawTwoLine(
         canvas: Canvas, l: CoverClockLayout.TwoLine, now: Date, locale: Locale,
         screenW: Float, screenH: Float, offX: Float, offY: Float,
     ) {
-        val tf = CoverClockFonts.typeface(context, l.font, l.weight) ?: return
         val hours = DateFormat.format(if (DateFormat.is24HourFormat(context)) "HH" else "hh", now).toString()
         val minutes = DateFormat.format("mm", now).toString()
-        twoLinePaint.typeface = tf
-        twoLinePaint.textSize = l.textSizeFrac * screenH
-        twoLinePaint.color = l.color or 0xFF000000.toInt()
-        val anchor = l.anchorXFrac * screenW
-        for ((text, baseline) in listOf(hours to l.hoursBaselineFrac, minutes to l.minutesBaselineFrac)) {
-            val adv = twoLinePaint.measureText(text)
-            val x = when (l.align) {
-                CoverClockLayout.Align.LEFT -> anchor
-                CoverClockLayout.Align.CENTER -> anchor - adv / 2
-                CoverClockLayout.Align.RIGHT -> anchor - adv
+        val opaque = l.color or 0xFF000000.toInt()
+        val p = l.paths
+        if (p != null) {
+            // Fixed slots: each line sits exactly where the template's sample does.
+            drawPathDigits(
+                canvas, "12", hours, p.hoursLeftFrac * screenW - offX, p.hoursBottomFrac * screenH - offY,
+                p.heightFrac * screenH, opaque, p.topAlpha, p.thickness, p.digitSet,
+            )
+            drawPathDigits(
+                canvas, "45", minutes, p.minutesLeftFrac * screenW - offX, p.minutesBottomFrac * screenH - offY,
+                p.heightFrac * screenH, opaque, p.topAlpha, p.thickness, p.digitSet,
+            )
+        } else {
+            val tf = CoverClockFonts.typeface(context, l.font, l.weight) ?: return
+            twoLinePaint.typeface = tf
+            twoLinePaint.textSize = l.textSizeFrac * screenH
+            twoLinePaint.color = opaque
+            val anchor = l.anchorXFrac * screenW
+            val lines = if (l.oneLine) {
+                listOf(DateFormat.format(timePattern(locale), now).toString() to l.hoursBaselineFrac)
+            } else {
+                listOf(hours to l.hoursBaselineFrac, minutes to l.minutesBaselineFrac)
             }
-            canvas.drawText(text, x - offX, baseline * screenH - offY, twoLinePaint)
+            for ((text, baseline) in lines) {
+                val adv = twoLinePaint.measureText(text)
+                val x = when (l.align) {
+                    CoverClockLayout.Align.LEFT -> anchor
+                    CoverClockLayout.Align.CENTER -> anchor - adv / 2
+                    CoverClockLayout.Align.RIGHT -> anchor - adv
+                }
+                canvas.drawText(text, x - offX, baseline * screenH - offY, twoLinePaint)
+            }
         }
 
         val dateText = DateFormat.format(
@@ -138,42 +200,24 @@ class CoverClockRenderer(private val context: Context) {
         canvas: Canvas, l: CoverClockLayout.Stacked, timeText: String, opaque: Int,
         screenW: Float, screenH: Float, offX: Float, offY: Float,
     ) {
-        val digits = samsungDigits ?: return
-        val sample = digits.bounds(CoverClockLayout.SAMPLE_TIME)
-        val s = l.digitHeightFrac * screenH / (sample.height() + SamsungClockDigits.STROKE)
-        val w = SamsungClockDigits.STROKE * s
-        val bottom = l.digitsBottomFrac * screenH
-        val centerY = bottom - sample.bottom * s - w / 2
-        val top = centerY + sample.top * s - w / 2
-        // The sample starts with "1": its ink left edge fixes the first slot.
-        val firstSlot = l.digitsLeftFrac * screenW - digits.bounds("1").left * s + w / 2
-        val a = SamsungClockDigits.ADVANCE * s
-        val g = SamsungClockDigits.COLON_GAP * s
-        val slots = floatArrayOf(firstSlot, firstSlot + a, firstSlot + a + g, firstSlot + a + 2 * g, firstSlot + 2 * a + 2 * g)
+        // "HH:mm" fills the five slots; a one-digit hour ("9:05") is right-aligned into them.
+        drawPathDigits(
+            canvas, CoverClockLayout.SAMPLE_TIME, timeText, l.digitsLeftFrac * screenW - offX,
+            l.digitsBottomFrac * screenH - offY, l.digitHeightFrac * screenH, opaque, l.digitsTopAlpha, l.thickness, l.digitSet,
+        )
+    }
 
-        val faded = (opaque and 0x00FFFFFF) or ((l.digitsTopAlpha * 255).toInt() shl 24)
-        val fade = LinearGradient(0f, top - offY, 0f, bottom - offY, faded, opaque, Shader.TileMode.CLAMP)
-        digitStrokePaint.strokeWidth = w
+    /** Samsung's path digits, faded towards the top (opacity [topAlpha]) like Samsung's. */
+    private fun drawPathDigits(
+        canvas: Canvas, sample: String, text: String, left: Float, bottom: Float, height: Float,
+        opaque: Int, topAlpha: Float, thickness: Float, set: SamsungClockDigits.Set,
+    ) {
+        val digits = SamsungClockDigits.load(context, set) ?: return
+        val faded = (opaque and 0x00FFFFFF) or ((topAlpha * 255).toInt() shl 24)
+        val fade = LinearGradient(0f, bottom - height, 0f, bottom, faded, opaque, Shader.TileMode.CLAMP)
         digitStrokePaint.shader = fade
         dotPaint.shader = fade
-
-        // "HH:mm" fills the five slots; a one-digit hour ("9:05") is right-aligned into them.
-        val chars = timeText.filter { it.isDigit() || it == ':' }
-        val startSlot = (slots.size - chars.length).coerceAtLeast(0)
-        chars.forEachIndexed { i, c ->
-            val x = slots.getOrNull(startSlot + i) ?: return@forEachIndexed
-            if (c == ':') {
-                val r = SamsungClockDigits.DOT_DIAMETER * s / 2
-                canvas.drawCircle(x - offX, centerY - SamsungClockDigits.DOT_OFFSET * s - offY, r, dotPaint)
-                canvas.drawCircle(x - offX, centerY + SamsungClockDigits.DOT_OFFSET * s - offY, r, dotPaint)
-            } else {
-                digitMatrix.setScale(s, s)
-                digitMatrix.postTranslate(x - offX, centerY - offY)
-                digitPath.set(digits.path(c - '0'))
-                digitPath.transform(digitMatrix)
-                canvas.drawPath(digitPath, digitStrokePaint)
-            }
-        }
+        digits.draw(canvas, sample, text, left, bottom, height, digitStrokePaint, dotPaint, thickness)
     }
 
     private fun drawHorizontal(

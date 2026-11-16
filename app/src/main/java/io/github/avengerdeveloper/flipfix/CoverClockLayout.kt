@@ -41,6 +41,9 @@ sealed interface CoverClockLayout {
         val color: Int,
         /** Digit opacity at the top of the digits (Samsung fades them in towards the bottom). */
         val digitsTopAlpha: Float,
+        /** Stroke thickness of the digits, in digit units (Samsung's clock editor has a thickness setting). */
+        val thickness: Float = SamsungClockDigits.STROKE,
+        val digitSet: SamsungClockDigits.Set = SamsungClockDigits.Set.BIG,
     ) : CoverClockLayout
 
     /**
@@ -63,9 +66,47 @@ sealed interface CoverClockLayout {
         val dateTextSizeFrac: Float,
         val dateBaselineFrac: Float,
         val dateColor: Int,
+        /** The time on one line ("12:45", baseline [hoursBaselineFrac]) instead of hours over minutes. */
+        val oneLine: Boolean = false,
+        /** Set: the digits are Samsung's rounded path digits (SamsungClockDigits), not a font. */
+        val paths: PathLines? = null,
     ) : CoverClockLayout
 
+    /** Hours over minutes in Samsung's path digits: each line's ink left and bottom, ink height, fade. */
+    data class PathLines(
+        val hoursLeftFrac: Float,
+        val hoursBottomFrac: Float,
+        val minutesLeftFrac: Float,
+        val minutesBottomFrac: Float,
+        val heightFrac: Float,
+        val topAlpha: Float,
+        val thickness: Float = SamsungClockDigits.STROKE,
+        val digitSet: SamsungClockDigits.Set = SamsungClockDigits.Set.BIG,
+    )
+
     enum class Align { LEFT, CENTER, RIGHT }
+
+    /**
+     * One line ("Wed 1 February 12:45") turned on its side, reading upwards. Coordinates are in the line's
+     * own upright frame: x runs up the cover (fraction of its height), y runs across it from the left
+     * (fraction of its width); sizes are fractions of the cover's height. The end of the line ([anchorFrac],
+     * at the time's ink) stays put, as on Samsung's lock screen; the date sits [gapFrac] before the time.
+     */
+    data class Sideways(
+        val timeFont: String,
+        val timeWeight: Int,
+        val timeTextSizeFrac: Float,
+        val timeBaselineFrac: Float,
+        val timeFirst: Boolean,
+        val anchorFrac: Float,
+        val gapFrac: Float,
+        val dateLongMonth: Boolean,
+        val dateTextSizeFrac: Float,
+        val dateScaleX: Float,
+        val dateBaselineFrac: Float,
+        val color: Int,
+        val dateColor: Int,
+    ) : CoverClockLayout
 
     data object Unknown : CoverClockLayout
 
@@ -160,8 +201,10 @@ sealed interface CoverClockLayout {
                 // A one-line clock is a thin band; a band filling the template is an illustrated face.
                 bands.size == 1 && bands[0].height < h * 0.2f ->
                     Horizontal(CoverClockStyle.fromBand(t, bands[0]) ?: return Unknown)
-                bands.size == 2 && bands[1].height > bands[0].height * 1.8f -> stacked(t, bands[0], bands[1])
-                else -> twoLine(context, t, "${file.path}@${file.lastModified()}")
+                bands.size == 2 && bands[1].height > bands[0].height * 1.8f ->
+                    stacked(context, t, bands[0], bands[1], "${file.path}@${file.lastModified()}")
+                else -> twoLine(context, t, "${file.path}@${file.lastModified()}").takeIf { it != Unknown }
+                    ?: sideways(context, t, "${file.path}@${file.lastModified()}")
             }
             Log.d(CoverState.TAG, "cover clock from ${file.parentFile?.name}: bands=$bands -> $layout")
             return layout
@@ -183,92 +226,253 @@ sealed interface CoverClockLayout {
                 }
                 else -> return Unknown
             }
-            val (hx0, hx1) = t.xRange(hours) ?: return Unknown
-            val (mx0, mx1) = t.xRange(minutes) ?: return Unknown
-            val (dx0, dx1) = t.xRange(date) ?: return Unknown
-
-            val font = CoverClockFonts.identifyCached(context, key) {
-                listOf(
-                    t.sample(SAMPLE_HOURS, android.graphics.Rect(hx0, hours.top, hx1 + 1, hours.bottom + 1)),
-                    t.sample(SAMPLE_MINUTES, android.graphics.Rect(mx0, minutes.top, mx1 + 1, minutes.bottom + 1)),
+            val hoursRect = t.inkRect(hours) ?: return Unknown
+            val minutesRect = t.inkRect(minutes) ?: return Unknown
+            val dateRect = t.inkRect(date) ?: return Unknown
+            val samples = {
+                listOf(t.sample(SAMPLE_HOURS, hoursRect), t.sample(SAMPLE_MINUTES, minutesRect))
+            }
+            val font = CoverClockFonts.identifyCached(context, key, samples)
+            val pathMatch = CoverClockFonts.pathOverlap(context, samples())
+            val paths = pathMatch.overlap
+            Log.d(CoverState.TAG, "cover clock two lines: font $font, Samsung's path digits $pathMatch")
+            if (paths >= CoverClockFonts.MIN_OVERLAP && paths > (font?.overlap ?: 0f)) {
+                val inkCenter = (hoursRect.exactCenterX() + minutesRect.exactCenterX()) / 2
+                val align = alignOf(inkCenter, t.w)
+                val color = t.opaqueColor(hours) ?: Color.WHITE
+                val d = dateFields(t, dateRect, align, color) ?: return Unknown
+                return TwoLine(
+                    font = "", weight = 0, align = align, anchorXFrac = 0f, textSizeFrac = 0f,
+                    hoursBaselineFrac = 0f, minutesBaselineFrac = 0f, color = color,
+                    dateLongMonth = d.long, dateAnchorXFrac = d.anchor / t.w, dateTextSizeFrac = d.size / t.h,
+                    dateBaselineFrac = d.baseline / t.h, dateColor = d.color,
+                    paths = PathLines(
+                        hoursLeftFrac = hoursRect.left.toFloat() / t.w,
+                        hoursBottomFrac = hoursRect.bottom.toFloat() / t.h,
+                        minutesLeftFrac = minutesRect.left.toFloat() / t.w,
+                        minutesBottomFrac = minutesRect.bottom.toFloat() / t.h,
+                        heightFrac = hoursRect.height().toFloat() / t.h,
+                        topAlpha = t.topAlpha(hours),
+                        thickness = pathMatch.thickness,
+                        digitSet = pathMatch.set,
+                    ),
                 )
-            } ?: return Unknown
-            val tf = CoverClockFonts.typeface(context, font.font, font.weight) ?: return Unknown
+            }
+            if (font == null || font.overlap < CoverClockFonts.MIN_OVERLAP) return Unknown
+            return fontClock(context, t, font, listOf(SAMPLE_HOURS to hoursRect, SAMPLE_MINUTES to minutesRect), dateRect)
+        }
 
-            // Digits: size from the sample hours' ink height, baselines from each line's ink bottom.
+        private fun alignOf(centerX: Float, width: Int) = when {
+            kotlin.math.abs(centerX - width / 2f) < width * 0.02f -> Align.CENTER
+            centerX < width / 2f -> Align.LEFT
+            else -> Align.RIGHT
+        }
+
+        /**
+         * Time line(s) in an AOD font: one line ("12:45") or hours over minutes ("12", "45"), with a date.
+         * Size from the first line's ink height, baselines from each line's ink bottom, alignment from where
+         * the lines' advance boxes sit (as Samsung lays them out).
+         */
+        private fun fontClock(
+            context: Context, t: Template, font: CoverClockFonts.Match,
+            lines: List<Pair<String, android.graphics.Rect>>, dateRect: android.graphics.Rect,
+        ): CoverClockLayout {
+            val tf = CoverClockFonts.typeface(context, font.font, font.weight) ?: return Unknown
             val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { typeface = tf }
             val r = android.graphics.Rect()
+            val (firstText, firstRect) = lines.first()
             paint.textSize = 200f
-            paint.getTextBounds(SAMPLE_HOURS, 0, SAMPLE_HOURS.length, r)
-            paint.textSize = 200f * hours.height / r.height().coerceAtLeast(1)
-            val hb = android.graphics.Rect().also { paint.getTextBounds(SAMPLE_HOURS, 0, SAMPLE_HOURS.length, it) }
-            val mb = android.graphics.Rect().also { paint.getTextBounds(SAMPLE_MINUTES, 0, SAMPLE_MINUTES.length, it) }
-            val hOrigin = hx0 - hb.left.toFloat()
-            val mOrigin = mx0 - mb.left.toFloat()
-            val hAdv = paint.measureText(SAMPLE_HOURS)
-            val mAdv = paint.measureText(SAMPLE_MINUTES)
-            val center = (hOrigin + hAdv / 2 + mOrigin + mAdv / 2) / 2
-            val align = when {
-                kotlin.math.abs(center - t.w / 2f) < t.w * 0.02f -> Align.CENTER
-                center < t.w / 2f -> Align.LEFT
-                else -> Align.RIGHT
+            paint.getTextBounds(firstText, 0, firstText.length, r)
+            paint.textSize = 200f * firstRect.height() / r.height().coerceAtLeast(1)
+            val origins = FloatArray(lines.size)
+            val advances = FloatArray(lines.size)
+            val baselines = FloatArray(lines.size)
+            lines.forEachIndexed { i, (text, rect) ->
+                paint.getTextBounds(text, 0, text.length, r)
+                origins[i] = rect.left - r.left.toFloat()
+                advances[i] = paint.measureText(text)
+                baselines[i] = rect.bottom - r.bottom.toFloat()
             }
+            val center = lines.indices.map { origins[it] + advances[it] / 2 }.average().toFloat()
+            val align = alignOf(center, t.w)
             val anchor = when (align) {
-                Align.LEFT -> (hOrigin + mOrigin) / 2
+                Align.LEFT -> origins.average().toFloat()
                 Align.CENTER -> center
-                Align.RIGHT -> (hOrigin + hAdv + mOrigin + mAdv) / 2
+                Align.RIGHT -> lines.indices.map { origins[it] + advances[it] }.average().toFloat()
             }
-
-            // Date: the sample is "Wed 1 February" or "Wed 1 Feb"; whichever has the template's proportions.
-            val datePaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
-                typeface = stackedDateTypeface()
-                letterSpacing = DATE_LETTER_SPACING
-                textSize = 100f
-            }
-            val inkAspect = (dx1 - dx0 + 1f) / date.height
-            fun aspect(s: String) = r.also { datePaint.getTextBounds(s, 0, s.length, it) }
-                .let { it.width().toFloat() / it.height().coerceAtLeast(1) }
-            val long = kotlin.math.abs(aspect(SAMPLE_DATE_LONG) - inkAspect) < kotlin.math.abs(aspect(SAMPLE_DATE_SHORT) - inkAspect)
-            val sampleDate = if (long) SAMPLE_DATE_LONG else SAMPLE_DATE_SHORT
-            datePaint.getTextBounds(sampleDate, 0, sampleDate.length, r)
-            val dateSize = 100f * date.height / r.height().coerceAtLeast(1)
-            datePaint.textSize = dateSize
-            datePaint.getTextBounds(sampleDate, 0, sampleDate.length, r)
-            val dateAnchor = when (align) {
-                Align.LEFT -> dx0.toFloat()
-                Align.CENTER -> (dx0 + dx1 + 1) / 2f
-                Align.RIGHT -> dx1 + 1f
-            }
-            val color = t.opaqueColor(hours) ?: Color.WHITE
+            val color = t.opaqueColor(Band(firstRect.top, firstRect.bottom - 1)) ?: Color.WHITE
+            val d = dateFields(t, dateRect, align, color) ?: return Unknown
             return TwoLine(
                 font = font.font,
                 weight = font.weight,
                 align = align,
                 anchorXFrac = anchor / t.w,
                 textSizeFrac = paint.textSize / t.h,
-                hoursBaselineFrac = (hours.bottom + 1f - hb.bottom) / t.h,
-                minutesBaselineFrac = (minutes.bottom + 1f - mb.bottom) / t.h,
+                hoursBaselineFrac = baselines.first() / t.h,
+                minutesBaselineFrac = baselines.last() / t.h,
                 color = color,
-                dateLongMonth = long,
-                dateAnchorXFrac = dateAnchor / t.w,
-                dateTextSizeFrac = dateSize / t.h,
-                dateBaselineFrac = (date.bottom + 1f - r.bottom) / t.h,
-                dateColor = t.opaqueColor(date) ?: color,
+                dateLongMonth = d.long,
+                dateAnchorXFrac = d.anchor / t.w,
+                dateTextSizeFrac = d.size / t.h,
+                dateBaselineFrac = d.baseline / t.h,
+                dateColor = d.color,
+                oneLine = lines.size == 1,
             )
         }
 
+        private class DateFields(val long: Boolean, val anchor: Float, val size: Float, val baseline: Float, val color: Int)
+
+        /**
+         * The date line at [rect]: sample "Wed 1 February" or "Wed 1 Feb" (whichever has its proportions),
+         * sized by its ink height (system stand-in font), anchored by its ink like the clock ([align]).
+         */
+        private fun dateFields(t: Template, rect: android.graphics.Rect, align: Align, fallbackColor: Int): DateFields? {
+            if (rect.height() <= 0) return null
+            val r = android.graphics.Rect()
+            val datePaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+                typeface = stackedDateTypeface()
+                letterSpacing = DATE_LETTER_SPACING
+                textSize = 100f
+            }
+            val inkAspect = rect.width().toFloat() / rect.height()
+            fun aspect(s: String) = r.also { datePaint.getTextBounds(s, 0, s.length, it) }
+                .let { it.width().toFloat() / it.height().coerceAtLeast(1) }
+            val long = kotlin.math.abs(aspect(SAMPLE_DATE_LONG) - inkAspect) < kotlin.math.abs(aspect(SAMPLE_DATE_SHORT) - inkAspect)
+            val sample = if (long) SAMPLE_DATE_LONG else SAMPLE_DATE_SHORT
+            datePaint.getTextBounds(sample, 0, sample.length, r)
+            val size = 100f * rect.height() / r.height().coerceAtLeast(1)
+            datePaint.textSize = size
+            datePaint.getTextBounds(sample, 0, sample.length, r)
+            val anchor = when (align) {
+                Align.LEFT -> rect.left.toFloat()
+                Align.CENTER -> rect.exactCenterX()
+                Align.RIGHT -> rect.right.toFloat()
+            }
+            return DateFields(
+                long, anchor, size, rect.bottom - r.bottom.toFloat(),
+                t.opaqueColor(Band(rect.top, rect.bottom - 1)) ?: fallbackColor,
+            )
+        }
+
+        /**
+         * A one-line clock turned on its side (reading upwards): the template turned upright is a single
+         * thin line of words, the time at one end.
+         */
+        private fun sideways(context: Context, t: Template, key: String): CoverClockLayout {
+            // Upright view: a quarter turn clockwise. Leave out the status icons and the camera shortcut.
+            val statusBottom = (t.h * SIDEWAYS_STATUS_BOTTOM).toInt()
+            val up = IntArray(t.w * t.h)
+            for (y in statusBottom until t.h) for (x in 0 until t.w) {
+                if (x > t.w * CAMERA_LEFT && y > t.h * CAMERA_TOP) continue
+                up[x * t.h + (t.h - 1 - y)] = t.pixel(x, y)
+            }
+            val u = Template(up, t.h, t.w, cameraCorner = false) // camera already left out
+            val bands = u.bands(from = 0, mergeGap = (u.h * 0.006f).toInt())
+            val line = bands.singleOrNull()?.takeIf { it.height < u.h * 0.2f } ?: return Unknown
+
+            // Words: column runs split by gaps wider than a quarter of the line height.
+            val words = mutableListOf<Pair<Int, Int>>()
+            var start = -1; var last = -1
+            for (x in 0 until u.w) {
+                if (!u.columnHasInk(line, x)) continue
+                if (start < 0) start = x
+                else if (x - last > line.height / 4) { words += start to last; start = x }
+                last = x
+            }
+            if (start >= 0) words += start to last
+            if (words.size < 2) return Unknown
+
+            fun rect(word: Pair<Int, Int>): android.graphics.Rect? {
+                val b = u.yRange(line, word.first, word.second) ?: return null
+                return android.graphics.Rect(word.first, b.top, word.second + 1, b.bottom + 1)
+            }
+            // The time is at the end of the line, or (other order) at its start.
+            var timeFirst = false
+            var timeRect = rect(words.last()) ?: return Unknown
+            var font = CoverClockFonts.identifyCached(context, "$key#end") { listOf(u.sample(SAMPLE_TIME, timeRect)) }
+            if (font == null) {
+                timeFirst = true
+                timeRect = rect(words.first()) ?: return Unknown
+                font = CoverClockFonts.identifyCached(context, "$key#start") { listOf(u.sample(SAMPLE_TIME, timeRect)) }
+                    ?: return Unknown
+            }
+            val dateWords = if (timeFirst) words.drop(1) else words.dropLast(1)
+            val dateBand = u.yRange(line, dateWords.first().first, dateWords.last().second) ?: return Unknown
+            val dateLeft = dateWords.first().first
+            val dateRight = dateWords.last().second + 1
+            val tf = CoverClockFonts.typeface(context, font.font, font.weight) ?: return Unknown
+
+            val r = android.graphics.Rect()
+            val timePaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { typeface = tf; textSize = 200f }
+            timePaint.getTextBounds(SAMPLE_TIME, 0, SAMPLE_TIME.length, r)
+            timePaint.textSize = 200f * timeRect.height() / r.height().coerceAtLeast(1)
+            timePaint.getTextBounds(SAMPLE_TIME, 0, SAMPLE_TIME.length, r)
+            val timeBaseline = timeRect.bottom - r.bottom.toFloat()
+
+            // Date: Samsung's date font isn't readable; a close system font, stretched to the template's width.
+            val datePaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+                typeface = CoverClockStyle.dateTypeface(); textSize = 100f
+            }
+            val inkAspect = (dateRight - dateLeft).toFloat() / dateBand.height
+            fun aspect(s: String) = r.also { datePaint.getTextBounds(s, 0, s.length, it) }
+                .let { it.width().toFloat() / it.height().coerceAtLeast(1) }
+            val long = kotlin.math.abs(aspect(SAMPLE_DATE_LONG) - inkAspect) < kotlin.math.abs(aspect(SAMPLE_DATE_SHORT) - inkAspect)
+            val sampleDate = if (long) SAMPLE_DATE_LONG else SAMPLE_DATE_SHORT
+            datePaint.getTextBounds(sampleDate, 0, sampleDate.length, r)
+            datePaint.textSize = 100f * dateBand.height / r.height().coerceAtLeast(1)
+            datePaint.getTextBounds(sampleDate, 0, sampleDate.length, r)
+            val scaleX = (dateRight - dateLeft).toFloat() / r.width().coerceAtLeast(1)
+            val dateBaseline = dateBand.bottom + 1f - r.bottom
+
+            val gap = if (timeFirst) dateLeft - timeRect.right else timeRect.left - dateRight
+            val anchor = if (timeFirst) timeRect.left else timeRect.right
+            val color = u.opaqueColor(Band(timeRect.top, timeRect.bottom - 1)) ?: Color.WHITE
+            return Sideways(
+                timeFont = font.font,
+                timeWeight = font.weight,
+                timeTextSizeFrac = timePaint.textSize / u.w,
+                timeBaselineFrac = timeBaseline / u.h,
+                timeFirst = timeFirst,
+                anchorFrac = anchor.toFloat() / u.w,
+                gapFrac = gap.toFloat() / u.w,
+                dateLongMonth = long,
+                dateTextSizeFrac = datePaint.textSize / u.w,
+                dateScaleX = scaleX,
+                dateBaselineFrac = dateBaseline / u.h,
+                color = color,
+                dateColor = u.opaqueColor(dateBand) ?: color,
+            )
+        }
+
+        /** Bottom of the template's sample status icons (the sideways clock starts just below them). */
+        private const val SIDEWAYS_STATUS_BOTTOM = 0.065f
         private const val SAMPLE_HOURS = "12"
         private const val SAMPLE_MINUTES = "45"
         private const val SAMPLE_DATE_LONG = "Wed 1 February"
         private const val SAMPLE_DATE_SHORT = "Wed 1 Feb"
 
-        private fun stacked(t: Template, line: Band, digits: Band): CoverClockLayout {
+        /**
+         * Date line over one big time line. Samsung's default draws the digits with its rounded path digits
+         * ([Stacked]); other presets use an AOD font for the same layout ([TwoLine] with one line).
+         */
+        private fun stacked(context: Context, t: Template, line: Band, digits: Band, key: String): CoverClockLayout {
             val (dx0, dx1) = t.xRange(digits) ?: return Unknown
             val (lx0, lx1) = t.xRange(line) ?: return Unknown
             // The date is the first cluster of the line, up to a gap wider than half the line height
             // (then comes the weather icon).
             val dateRight = t.firstClusterRight(line, lx0, gap = (line.height * 0.5f).toInt())
             val dateBand = t.yRange(line, lx0, dateRight) ?: line
+
+            val digitsRect = android.graphics.Rect(dx0, digits.top, dx1 + 1, digits.bottom + 1)
+            val samples = { listOf(t.sample(SAMPLE_TIME, digitsRect)) }
+            val font = CoverClockFonts.identifyCached(context, "$key#line", samples)
+            val pathMatch = CoverClockFonts.pathOverlap(context, samples())
+            val paths = pathMatch.overlap
+            Log.d(CoverState.TAG, "cover clock one line: font $font, Samsung's path digits $pathMatch")
+            if (font != null && font.overlap >= CoverClockFonts.MIN_OVERLAP && font.overlap > paths) {
+                val dateRect = android.graphics.Rect(lx0, dateBand.top, dateRight + 1, dateBand.bottom + 1)
+                return fontClock(context, t, font, listOf(SAMPLE_TIME to digitsRect), dateRect)
+            }
             return Stacked(
                 digitsLeftFrac = dx0.toFloat() / t.w,
                 digitsBottomFrac = (digits.bottom + 1f) / t.h,
@@ -278,6 +482,8 @@ sealed interface CoverClockLayout {
                 dateHeightFrac = dateBand.height.toFloat() / t.h,
                 color = t.opaqueColor(digits) ?: Color.WHITE,
                 digitsTopAlpha = t.topAlpha(digits),
+                thickness = pathMatch.thickness,
+                digitSet = pathMatch.set,
             )
         }
 
@@ -293,13 +499,21 @@ sealed interface CoverClockLayout {
     }
 
     /** Pixel helpers over the template. */
-    class Template(private val px: IntArray, val w: Int, val h: Int) {
+    class Template(private val px: IntArray, val w: Int, val h: Int, private val cameraCorner: Boolean = true) {
         fun alpha(x: Int, y: Int) = Color.alpha(px[y * w + x])
+
+        fun pixel(x: Int, y: Int) = px[y * w + x]
+
+        /** Ink box of [b] (right and bottom exclusive). */
+        fun inkRect(b: Band): android.graphics.Rect? {
+            val (x0, x1) = xRange(b) ?: return null
+            return android.graphics.Rect(x0, b.top, x1 + 1, b.bottom + 1)
+        }
 
         fun sample(text: String, rect: android.graphics.Rect) = CoverClockFonts.sample(text, px, w, rect, INK_ALPHA)
 
         /** Clock ink; the camera shortcut Samsung draws in the bottom-right corner doesn't count. */
-        fun ink(x: Int, y: Int) = alpha(x, y) > INK_ALPHA && !(x > w * CAMERA_LEFT && y > h * CAMERA_TOP)
+        fun ink(x: Int, y: Int) = alpha(x, y) > INK_ALPHA && !(cameraCorner && x > w * CAMERA_LEFT && y > h * CAMERA_TOP)
 
         fun bands(from: Int, mergeGap: Int): List<Band> {
             val out = mutableListOf<Band>()

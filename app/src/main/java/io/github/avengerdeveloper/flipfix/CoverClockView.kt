@@ -20,6 +20,9 @@ class CoverClockView @JvmOverloads constructor(
 ) : View(context, attrs) {
 
     private var layout = CoverClockLayout.load(context)
+
+    /** Offset of Samsung's clock from the template's, as measured on the lock screen (cover fractions). */
+    private var shift = CoverFaceMatcher.activeShift(context)
     private val renderer = CoverClockRenderer(context)
 
     /**
@@ -46,7 +49,8 @@ class CoverClockView @JvmOverloads constructor(
     fun reloadStyleAsync() {
         Thread {
             val fresh = CoverClockLayout.load(context)
-            if (fresh != layout) post { layout = fresh; invalidate() }
+            val freshShift = CoverFaceMatcher.activeShift(context)
+            if (fresh != layout || freshShift != shift) post { layout = fresh; shift = freshShift; invalidate() }
         }.start()
     }
 
@@ -75,15 +79,18 @@ class CoverClockView @JvmOverloads constructor(
             // Full cover-display size: the layout is defined in display coordinates, not view coordinates.
             val windowBounds = context.getSystemService(WindowManager::class.java)?.currentWindowMetrics?.bounds
             getLocationOnScreen(location)
+            val w = (windowBounds?.width() ?: width).toFloat()
+            val h = (windowBounds?.height() ?: height).toFloat()
             renderer.draw(
-                canvas, layout, Date(),
-                (windowBounds?.width() ?: width).toFloat(), (windowBounds?.height() ?: height).toFloat(),
-                location[0].toFloat(), location[1].toFloat(),
+                canvas, layout, Date(), w, h,
+                location[0] - shift.first * w, location[1] - shift.second * h,
             )
         } else {
             // Drawn inside a moving/scaled card that represents the whole cover: lay out in the view's own
             // coordinates so the clock moves and scales with the card.
-            renderer.draw(canvas, layout, Date(), width.toFloat(), height.toFloat())
+            val w = width.toFloat()
+            val h = height.toFloat()
+            renderer.draw(canvas, layout, Date(), w, h, -shift.first * w, -shift.second * h)
         }
     }
 }

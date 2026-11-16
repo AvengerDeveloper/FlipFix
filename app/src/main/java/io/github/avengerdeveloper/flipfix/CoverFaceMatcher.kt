@@ -55,6 +55,12 @@ object CoverFaceMatcher {
     /** Minimum (ink match - background match) for a preset to count as the active one. */
     private const val MIN_SCORE = 0.30f
 
+    /** Largest offset tried between the template's clock and Samsung's, in comparison pixels (x2 on the cover). */
+    private const val MAX_SHIFT = 20
+    private const val SHIFT_STEP = 4
+    private const val KEY_SHIFT_X = "shift_x"
+    private const val KEY_SHIFT_Y = "shift_y"
+
     private val observers = CopyOnWriteArraySet<() -> Unit>()
     @Volatile private var lastUnstampedCheck = 0L
 
@@ -129,31 +135,36 @@ object CoverFaceMatcher {
         val drawn = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(drawn).apply { scale(1f / SCALE, 1f / SCALE) }
         val clock = IntArray(w * h)
-        val scores = byLayout.map { (layout, files) ->
+        val fits = byLayout.map { (layout, files) ->
             drawn.eraseColor(Color.TRANSPARENT)
             renderer.draw(canvas, layout, at, coverW.toFloat(), coverH.toFloat())
             drawn.getPixels(clock, 0, w, 0, 0, w, h)
-            files to score(clock, screen, w, h)
+            files to (probe(clock, w, h)?.let { bestFit(it, screen, w, h) } ?: Fit(0f, 0, 0))
         }
         drawn.recycle()
 
-        val best = scores.maxByOrNull { it.second }
-        val matched = best?.takeIf { it.second >= MIN_SCORE }?.first?.maxByOrNull { it.lastModified() }?.parentFile?.name
+        val best = fits.maxByOrNull { it.second.score }
+        val matchedFit = best?.takeIf { it.second.score >= MIN_SCORE }
+        val matched = matchedFit?.first?.maxByOrNull { it.lastModified() }?.parentFile?.name
         val p = prefs(context)
         val sameSwitch = p.getString(KEY_STAMP, null) == stamp
         val tries = if (sameSwitch) p.getInt(KEY_TRIES, 0) + (if (newTry) 1 else 0) else 1
         p.edit()
             .putString(KEY_STAMP, stamp)
             .putString(KEY_FOLDER, matched.orEmpty())
+            .putFloat(KEY_SHIFT_X, (matchedFit?.second?.dx ?: 0).toFloat() / w)
+            .putFloat(KEY_SHIFT_Y, (matchedFit?.second?.dy ?: 0).toFloat() / h)
             .putInt(KEY_TRIES, tries)
             .apply()
+        val scores = fits.map { it.first to it.second.score }
         if (stamp == NO_STAMP) lastUnstampedCheck = SystemClock.uptimeMillis()
 
         Log.d(
             CoverState.TAG,
             "cover preset check (${SystemClock.uptimeMillis() - started} ms, try $tries, $shotInfo, " +
                 "${byLayout.size} drawable of ${CoverClockLayout.templates().size}): " +
-                (matched ?: "no match") + "; scores " +
+                (matched ?: "no match") +
+                (matchedFit?.second?.let { " shifted ${it.dx * SCALE},${it.dy * SCALE} px" } ?: "") + "; scores " +
                 scores.sortedByDescending { it.second }.joinToString { (files, s) ->
                     "${files.joinToString("+") { it.parentFile?.name.orEmpty() }}=${"%.2f".format(s)}"
                 },
@@ -163,35 +174,79 @@ object CoverFaceMatcher {
     }
 
     /**
-     * How well FlipFix's drawn clock ([clock], transparent elsewhere) sits on Samsung's lock screen
-     * ([screen]): the share of ink pixels whose colour Samsung also has there (or one pixel away), minus the
-     * share of the background ring around the ink that happens to have that colour too. A white clock over
-     * clouds scores low on its own; only a clock in the right place, size and colour scores high.
+     * Where the shifted clock is (fractions of the cover), as Samsung's lock screen showed it for the active
+     * preset. Samsung's lock screen doesn't always put the clock exactly where the template has it (e.g. a
+     * right-aligned clock sits a little further right), so the check also finds that small offset.
      */
-    private fun score(clock: IntArray, screen: IntArray, w: Int, h: Int): Float {
+    fun activeShift(context: Context): Pair<Float, Float> {
+        if (activeTemplate(context) == null) return 0f to 0f
+        val p = prefs(context)
+        return p.getFloat(KEY_SHIFT_X, 0f) to p.getFloat(KEY_SHIFT_Y, 0f)
+    }
+
+    /** A drawn clock's ink pixels and the background ring around them, with the colours each should have. */
+    private class Probe(val ink: IntArray, val inkColor: IntArray, val ring: IntArray, val ringColor: IntArray)
+
+    private class Fit(val score: Float, val dx: Int, val dy: Int)
+
+    private fun probe(clock: IntArray, w: Int, h: Int): Probe? {
         var x0 = w; var y0 = h; var x1 = -1; var y1 = -1
         for (y in 0 until h) for (x in 0 until w) {
             if (Color.alpha(clock[y * w + x]) >= INK_ALPHA) {
                 if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y
             }
         }
-        if (x1 < 0) return 0f
-
-        var ink = 0; var inkHit = 0; var ring = 0; var ringHit = 0
+        if (x1 < 0) return null
+        val ink = ArrayList<Int>(); val inkColor = ArrayList<Int>()
+        val ring = ArrayList<Int>(); val ringColor = ArrayList<Int>()
         for (y in max(0, y0 - RING)..minOf(h - 1, y1 + RING)) for (x in max(0, x0 - RING)..minOf(w - 1, x1 + RING)) {
             val c = clock[y * w + x]
             val a = Color.alpha(c)
             if (a >= INK_ALPHA) {
-                ink++
-                if (near(screen, w, h, x, y, c)) inkHit++
+                ink += y * w + x; inkColor += c
             } else if (a == 0 && inkWithin(clock, w, h, x, y)) {
-                ring++
-                if (same(screen[y * w + x], nearestInkColor(clock, w, h, x, y))) ringHit++
+                ring += y * w + x; ringColor += nearestInkColor(clock, w, h, x, y)
             }
         }
-        if (ink < 20) return 0f
-        val inkRate = inkHit.toFloat() / ink
-        val ringRate = if (ring == 0) 0f else ringHit.toFloat() / ring
+        if (ink.size < 20) return null
+        return Probe(ink.toIntArray(), inkColor.toIntArray(), ring.toIntArray(), ringColor.toIntArray())
+    }
+
+    /** The best [score] with the drawn clock moved by up to [MAX_SHIFT] comparison pixels each way. */
+    private fun bestFit(p: Probe, screen: IntArray, w: Int, h: Int): Fit {
+        var best = Fit(score(p, screen, w, h, 0, 0), 0, 0)
+        for (dy in -MAX_SHIFT..MAX_SHIFT step SHIFT_STEP) for (dx in -MAX_SHIFT..MAX_SHIFT step SHIFT_STEP) {
+            val s = score(p, screen, w, h, dx, dy)
+            if (s > best.score) best = Fit(s, dx, dy)
+        }
+        val (cx, cy) = best.dx to best.dy
+        for (dy in cy - SHIFT_STEP + 1 until cy + SHIFT_STEP) for (dx in cx - SHIFT_STEP + 1 until cx + SHIFT_STEP) {
+            if (abs(dx) > MAX_SHIFT || abs(dy) > MAX_SHIFT) continue
+            val s = score(p, screen, w, h, dx, dy)
+            if (s > best.score) best = Fit(s, dx, dy)
+        }
+        return best
+    }
+
+    /**
+     * How well FlipFix's drawn clock, moved by ([dx], [dy]), sits on Samsung's lock screen ([screen]): the
+     * share of ink pixels whose colour Samsung also has there (or one pixel away), minus the share of the
+     * background ring around the ink that happens to have that colour too. A white clock over clouds scores
+     * low on its own; only a clock in the right place, size and colour scores high.
+     */
+    private fun score(p: Probe, screen: IntArray, w: Int, h: Int, dx: Int, dy: Int): Float {
+        var inkHit = 0
+        for (i in p.ink.indices) {
+            val x = p.ink[i] % w + dx; val y = p.ink[i] / w + dy
+            if (near(screen, w, h, x, y, p.inkColor[i])) inkHit++
+        }
+        var ringHit = 0
+        for (i in p.ring.indices) {
+            val x = p.ring[i] % w + dx; val y = p.ring[i] / w + dy
+            if (x in 0 until w && y in 0 until h && same(screen[y * w + x], p.ringColor[i])) ringHit++
+        }
+        val inkRate = inkHit.toFloat() / p.ink.size
+        val ringRate = if (p.ring.isEmpty()) 0f else ringHit.toFloat() / p.ring.size
         return inkRate - ringRate
     }
 

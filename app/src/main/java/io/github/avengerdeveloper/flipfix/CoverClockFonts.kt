@@ -24,7 +24,7 @@ object CoverClockFonts {
     private const val SAMPLE_HEIGHT = 64
 
     /** Minimum mean overlap (intersection over union) for a font to count as the preset's font. */
-    private const val MIN_OVERLAP = 0.85f
+    const val MIN_OVERLAP = 0.80f
 
     data class Match(val font: String, val weight: Int, val overlap: Float)
 
@@ -70,44 +70,95 @@ object CoverClockFonts {
         prefs.getString(key, null)?.let { saved ->
             if (saved == NONE) return null
             val parts = saved.split('|')
-            parts.getOrNull(1)?.toIntOrNull()?.let { return Match(parts[0], it, parts.getOrNull(2)?.toFloatOrNull() ?: 1f) }
+            parts.getOrNull(1)?.toIntOrNull()?.let { return Match(parts[0], it, parts.getOrNull(2)?.toFloatOrNull() ?: 0f) }
         }
         val match = identify(context, samples())
         prefs.edit().putString(key, match?.let { "${it.font}|${it.weight}|${it.overlap}" } ?: NONE).apply()
         return match
     }
 
-    private const val PREFS = "cover_clock_fonts"
+    /** v2: every best match is kept (the caller compares it with Samsung's path digits). */
+    private const val PREFS = "cover_clock_fonts_v2"
     private const val NONE = "-"
 
+    /** Mean overlap of [samples] with ink drawn by [draw] (text, sample) into an ALPHA_8 canvas. */
+    private fun overlap(samples: List<Sample>, draw: (Canvas, Sample) -> Int): Float = samples.map { s ->
+        var w = s.w + 2
+        var bmp = Bitmap.createBitmap(w, s.h + 2, Bitmap.Config.ALPHA_8)
+        val needed = draw(Canvas(bmp), s) + 2
+        if (needed > w) {
+            bmp.recycle()
+            w = needed
+            bmp = Bitmap.createBitmap(w, s.h + 2, Bitmap.Config.ALPHA_8)
+            draw(Canvas(bmp), s)
+        }
+        val drawn = ByteArray(w * (s.h + 2)).also { bmp.copyPixelsToBuffer(java.nio.ByteBuffer.wrap(it)) }
+        bmp.recycle()
+        var both = 0; var either = 0
+        for (y in 0 until s.h + 2) for (x in 0 until w) {
+            val a = (drawn[y * w + x].toInt() and 0xFF) > 127
+            val b = y < s.h && x < s.w && s.ink[y * s.w + x]
+            if (a && b) both++
+            if (a || b) either++
+        }
+        if (either == 0) 0f else both.toFloat() / either
+    }.average().toFloat()
+
     /**
-     * The AOD font and weight whose digits best cover [samples] (the template's sample hours and minutes),
-     * or null if none is close enough (then FlipFix draws no clock rather than a wrong one).
+     * How well Samsung's path-drawn digits (SamsungClockDigits: the default rounded set and the layered
+     * one) cover [samples], drawn the way FlipFix draws them, with the set and stroke thickness that fit
+     * best (Samsung's clock editor lets the thickness be changed).
+     */
+    fun pathOverlap(context: Context, samples: List<Sample>): PathMatch {
+        val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND; strokeJoin = Paint.Join.ROUND
+        }
+        val dot = Paint(Paint.ANTI_ALIAS_FLAG)
+        var best = PathMatch(0f, SamsungClockDigits.STROKE, SamsungClockDigits.Set.BIG)
+        for (set in SamsungClockDigits.Set.entries) {
+            val digits = SamsungClockDigits.load(context, set) ?: continue
+            fun at(thickness: Float) = overlap(samples) { canvas, s ->
+                digits.draw(canvas, s.text, s.text, 0f, s.h.toFloat(), s.h.toFloat(), stroke, dot, thickness)
+                s.w
+            }
+            fun consider(k: Float) = at(k).let { if (it > best.overlap) best = PathMatch(it, k, set) }
+            if (set == SamsungClockDigits.Set.BIG) consider(SamsungClockDigits.STROKE)
+            for (i in 0..THICKNESS_STEPS) consider(THICKNESS_MIN + (THICKNESS_MAX - THICKNESS_MIN) * i / THICKNESS_STEPS)
+            // Refine around the best step (if this set is the best so far).
+            if (best.set == set) {
+                val step = (THICKNESS_MAX - THICKNESS_MIN) / THICKNESS_STEPS
+                val around = best.thickness
+                consider(around - step / 2)
+                consider(around + step / 2)
+            }
+        }
+        return best
+    }
+
+    /** How well Samsung's path digits fit: which set, at which stroke thickness (digit units). */
+    data class PathMatch(val overlap: Float, val thickness: Float, val set: SamsungClockDigits.Set)
+
+    private const val THICKNESS_MIN = 0.06f
+    private const val THICKNESS_MAX = 0.24f
+    private const val THICKNESS_STEPS = 9
+
+    /**
+     * The AOD font and weight whose digits best cover [samples] (the template's sample time), with how well
+     * ([Match.overlap]; at least [MIN_OVERLAP] to be usable), or null if no font could be loaded.
      */
     fun identify(context: Context, samples: List<Sample>): Match? {
         val paint = Paint(Paint.ANTI_ALIAS_FLAG)
         val bounds = Rect()
-        fun overlap(tf: Typeface): Float = samples.map { s ->
+        fun overlap(tf: Typeface): Float = overlap(samples) { canvas, s ->
             paint.typeface = tf
             paint.textSize = 200f
             paint.getTextBounds(s.text, 0, s.text.length, bounds)
-            if (bounds.height() <= 0) return@map 0f
+            if (bounds.height() <= 0) return@overlap 0
             paint.textSize = 200f * s.h / bounds.height()
             paint.getTextBounds(s.text, 0, s.text.length, bounds)
-            val w = maxOf(s.w, bounds.width()) + 2
-            val bmp = Bitmap.createBitmap(w, s.h + 2, Bitmap.Config.ALPHA_8)
-            Canvas(bmp).drawText(s.text, -bounds.left.toFloat(), -bounds.top.toFloat(), paint)
-            val drawn = ByteArray(w * (s.h + 2)).also { bmp.copyPixelsToBuffer(java.nio.ByteBuffer.wrap(it)) }
-            bmp.recycle()
-            var both = 0; var either = 0
-            for (y in 0 until s.h + 2) for (x in 0 until w) {
-                val a = (drawn[y * w + x].toInt() and 0xFF) > 127
-                val b = y < s.h && x < s.w && s.ink[y * s.w + x]
-                if (a && b) both++
-                if (a || b) either++
-            }
-            if (either == 0) 0f else both.toFloat() / either
-        }.average().toFloat()
+            canvas.drawText(s.text, -bounds.left.toFloat(), -bounds.top.toFloat(), paint)
+            bounds.width()
+        }
 
         var best: Match? = null
         for (font in fonts(context)) {
@@ -132,6 +183,6 @@ object CoverClockFonts {
         // Weights tried but not chosen aren't needed any more.
         typefaces.keys.removeAll { key -> best == null || key != "${best.font}@${best.weight}" }
         Log.d(CoverState.TAG, "cover clock font: $best")
-        return best?.takeIf { it.overlap >= MIN_OVERLAP }
+        return best
     }
 }
