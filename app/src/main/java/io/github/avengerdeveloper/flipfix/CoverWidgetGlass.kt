@@ -88,7 +88,7 @@ class CoverWidgetGlass @JvmOverloads constructor(
 
         override fun onDraw(canvas: Canvas) {
             rect.set(0f, 0f, width.toFloat(), height.toFloat())
-            CoverWidgets.drawTile(canvas, tile, rect, tint = !frosted)
+            CoverWidgets.drawTile(canvas, tile, rect, frosted)
         }
     }
 

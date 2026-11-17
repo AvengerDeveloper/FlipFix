@@ -33,13 +33,9 @@ import kotlin.math.sin
 object CoverWidgets {
 
     /**
-     * A widget tile: where it is on the cover (fractions) and its marks, blurred, see-through around them;
-     * [strength]: how much its marks stood out (mean opacity before the blur; lower mid-fade).
+     * A widget tile: where it is on the cover (fractions) and its marks, blurred, see-through around them.
      */
-    class Tile(
-        val left: Float, val top: Float, val right: Float, val bottom: Float, val slots: Int, val image: Bitmap,
-        val strength: Float,
-    )
+    class Tile(val left: Float, val top: Float, val right: Float, val bottom: Float, val slots: Int, val image: Bitmap)
 
     /**
      * What the check of preset switch [stamp] saw: the matched preset's [folder] ("" if none) and its
@@ -47,7 +43,6 @@ object CoverWidgets {
      */
     class Row(val stamp: String, val folder: String, val tiles: List<Tile>, val looks: Int = 1) {
         val slots get() = tiles.sumOf { it.slots }
-        val strength get() = tiles.sumOf { it.strength.toDouble() }
         fun looked() = Row(stamp, folder, tiles, looks + 1)
     }
 
@@ -129,8 +124,10 @@ object CoverWidgets {
      * while [stamp] was current) under the clock whose ink spans [clock] there, aligned by [align] (null:
      * judged from where the ink sits). Keeps them, blurred, for [folder] (the matched preset; null: none
      * matched). Of the snapshots looked at for [stamp], the one that saw the most of the row wins, and on a
-     * tie the one whose marks stood out most: a later one may catch tiles mid-fade, or with an edge melted
-     * into the video, and one taken as the cover unlocks may catch them fading out. Returns a note for the log.
+     * tie the latest: Samsung fades the widgets in, so an earlier one may catch them part-way (paler, and
+     * showing the video through their panels), and one may miss a tile whose edge melted into the video.
+     * (A snapshot that finishes after the cover unlocks is dropped before it gets here.) Returns a note for
+     * the log.
      */
     fun look(
         stamp: String, folder: String?, screen: IntArray, w: Int, h: Int,
@@ -143,18 +140,15 @@ object CoverWidgets {
         val prev = row?.takeIf { it.stamp == stamp && it.folder == folder }
         val (found, closest) = find(screen, w, h, clock, align ?: alignOf(clock, w))
         val tiles = found.map { (rect, slots) ->
-            val (image, strength) = replica(screen, w, h, rect)
             // find() measures in pixel indices (a pixel's value sits at its centre); the cover is drawn in
             // pixel edges, half a snapshot pixel further on (1 cover pixel at the comparison scale).
             Tile(
                 (rect.left + 0.5f) / w, (rect.top + 0.5f) / h, (rect.right + 0.5f) / w, (rect.bottom + 0.5f) / h,
-                slots, image, strength,
+                slots, replica(screen, w, h, rect),
             )
         }
         val fresh = Row(stamp, folder, tiles, (prev?.looks ?: 0) + 1)
-        if (prev != null && prev.slots > 0 &&
-            (fresh.slots < prev.slots || (fresh.slots == prev.slots && fresh.strength <= prev.strength))
-        ) {
+        if (prev != null && fresh.slots < prev.slots) {
             row = prev.looked()
             return ""
         }
@@ -171,14 +165,18 @@ object CoverWidgets {
      */
     fun draw(canvas: Canvas, tiles: List<Tile>, w: Float, h: Float, offX: Float, offY: Float) {
         for (t in tiles) {
-            drawTile(canvas, t, RectF(t.left * w - offX, t.top * h - offY, t.right * w - offX, t.bottom * h - offY), tint = true)
+            drawTile(canvas, t, RectF(t.left * w - offX, t.top * h - offY, t.right * w - offX, t.bottom * h - offY), frosted = false)
         }
     }
 
-    /** Draws [tile] at [rect]: its marks, over a tint of the cover behind it if [tint]. */
-    fun drawTile(canvas: Canvas, tile: Tile, rect: RectF, tint: Boolean) {
+    /**
+     * Draws [tile] at [rect]: its marks, on Samsung's live blur if [frosted] (as is: the same blur preset
+     * matches Samsung's panels better than any tint over it, see [seeThroughTint]), else over a tint of the
+     * cover behind it.
+     */
+    fun drawTile(canvas: Canvas, tile: Tile, rect: RectF, frosted: Boolean) {
         val corner = corner(rect.height())
-        if (tint) canvas.drawRoundRect(rect, corner, corner, tintPaint)
+        if (!frosted) canvas.drawRoundRect(rect, corner, corner, seeThroughTint)
         val matrix = Matrix().apply {
             setScale(rect.width() / tile.image.width, rect.height() / tile.image.height)
             postTranslate(rect.left, rect.top)
@@ -194,10 +192,15 @@ object CoverWidgets {
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
 
     /**
-     * See-through stand-in for Samsung's frosted panel: about what its dark background blur does to the
+     * With nothing blurring the cover behind it: about what Samsung's dark background blur does to the
      * cover's middle tones (it squeezes them into 34-175), minus the blur.
+     *
+     * Over Samsung's blur no tint is drawn. Samsung's panels swing by up to 40 levels within 2 s as the
+     * video moves, while the blur alone tracks them as closely as can be measured (against the video around
+     * it, 0.94 of it vs Samsung's 0.93, colour cast within 1-2 levels). Every tint tried came out lighter:
+     * each widget's own colour at 50-60%, and a faint fixed blue at 15%.
      */
-    private val tintPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(128, 62, 70, 86) }
+    private val seeThroughTint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(128, 62, 70, 86) }
 
     private fun alignOf(clock: RectF, w: Int): CoverClockLayout.Align = when {
         abs(clock.centerX() - w / 2f) < w * 0.05f -> CoverClockLayout.Align.CENTER
@@ -410,10 +413,9 @@ object CoverWidgets {
      * The widget at [rect] on [screen] without its panel: only its own marks (text, icons, rings), lifted off
      * the panel and blurred past reading, see-through elsewhere, so the live cover shows around them. The
      * panel (Samsung's blur of the wallpaper behind it, which holds no marks near its edges) is taken as a
-     * smooth fit of that edge band; a mark is how far a pixel stands out from it, as opacity. Also returns
-     * how much the marks stood out (their mean opacity before the blur).
+     * smooth fit of that edge band; a mark is how far a pixel stands out from it, as opacity.
      */
-    private fun replica(screen: IntArray, w: Int, h: Int, rect: RectF): Pair<Bitmap, Float> {
+    private fun replica(screen: IntArray, w: Int, h: Int, rect: RectF): Bitmap {
         val x0 = (ceil(rect.left).toInt() + 1).coerceIn(0, w - 1)
         val y0 = (ceil(rect.top).toInt() + 1).coerceIn(0, h - 1)
         val x1 = (floor(rect.right).toInt() - 1).coerceIn(x0 + 1, w)
@@ -438,7 +440,6 @@ object CoverWidgets {
             alpha[i] = a
             for (c in 0..2) marks[c][i] = (rgb[c][i] - (1 - a) * panel[c][i]).coerceIn(0f, a * 255f)
         }
-        val strength = alpha.sum() / n
         val radius = max(1, (BLUR * unit).roundToInt())
         for (channel in arrayOf(alpha, marks[0], marks[1], marks[2])) repeat(3) {
             boxBlur(channel, cw, ch, radius, horizontal = true)
@@ -453,7 +454,7 @@ object CoverWidgets {
                 (marks[2][it] / a).roundToInt().coerceIn(0, 255),
             )
         }
-        return Bitmap.createBitmap(px, cw, ch, Bitmap.Config.ARGB_8888) to strength
+        return Bitmap.createBitmap(px, cw, ch, Bitmap.Config.ARGB_8888)
     }
 
     /**
