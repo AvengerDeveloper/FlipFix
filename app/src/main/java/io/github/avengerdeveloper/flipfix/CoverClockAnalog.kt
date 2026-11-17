@@ -30,8 +30,8 @@ internal object CoverClockAnalog {
     private const val MINUTE_ANGLE = 270f
     private const val SECOND_ANGLE = 0f
 
-    /** [withDate] false skips the date line (it needs the system fonts, which a bare app_process lacks). */
-    fun parse(t: CoverClockLayout.Template, withDate: Boolean = true): CoverClockLayout {
+    /** [dateFont] null skips the date line (the debug check: a bare app_process has no system fonts). */
+    fun parse(t: CoverClockLayout.Template, dateFont: CoverClockLayout.DateFont?): CoverClockLayout {
         val from = (t.h * 0.10f).toInt()
 
         // The minute hand: the longest horizontal run of ink, a few rows thick.
@@ -219,12 +219,12 @@ internal object CoverClockAnalog {
             ?.let { it or 0xFF000000.toInt() } ?: color
 
         // The date: the thin line just above (or below) the dial.
-        val date = (bands.getOrNull(first - 1) ?: bands.getOrNull(last + 1))?.takeIf { withDate }
+        val date = (bands.getOrNull(first - 1) ?: bands.getOrNull(last + 1))?.takeIf { dateFont != null }
             ?.takeIf { it.height < dialBand.height * 0.25f }
             ?.let { t.inkRect(it) }
             ?.let { dateRect ->
                 val align = CoverClockLayout.alignOf(dateRect.exactCenterX(), t.w)
-                CoverClockLayout.dateFields(t, dateRect, align, color)?.let { d ->
+                CoverClockLayout.dateFields(t, dateRect, align, color, dateFont ?: return@let null)?.let { d ->
                     CoverClockLayout.DateLine(d.long, align, d.anchor / t.w, d.size / t.h, d.baseline / t.h, d.color)
                 }
             }

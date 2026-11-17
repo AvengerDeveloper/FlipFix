@@ -30,7 +30,7 @@ object CoverClockCheck {
             val bmp = BitmapFactory.decodeFile(file.path) ?: continue
             val px = IntArray(bmp.width * bmp.height).also { bmp.getPixels(it, 0, bmp.width, 0, 0, bmp.width, bmp.height) }
             val t = CoverClockLayout.Template(px, bmp.width, bmp.height)
-            val layout = CoverClockAnalog.parse(t, withDate = false)
+            val layout = CoverClockAnalog.parse(t, dateFont = null)
             println("$id: $layout")
             if (layout !is CoverClockLayout.Analog) { bmp.recycle(); continue }
             println("$id: dial and hands at 12:45:00 vs template, overlap %.3f".format(templateOverlap(bmp, layout)))

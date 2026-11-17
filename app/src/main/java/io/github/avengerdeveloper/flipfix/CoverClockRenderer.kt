@@ -25,10 +25,12 @@ class CoverClockRenderer(private val context: Context) {
         strokeJoin = Paint.Join.ROUND
     }
     private val dotPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    // Z Flip8 date lines (every style but the Z Flip6 one-line clock): Samsung's date font.
     private val lineDatePaint by lazy {
+        val font = CoverClockLayout.dateFont(context)
         Paint(Paint.ANTI_ALIAS_FLAG or Paint.SUBPIXEL_TEXT_FLAG).apply {
-            typeface = CoverClockLayout.stackedDateTypeface()
-            letterSpacing = CoverClockLayout.DATE_LETTER_SPACING
+            typeface = font.typeface
+            letterSpacing = font.letterSpacing
         }
     }
 
@@ -126,7 +128,11 @@ class CoverClockRenderer(private val context: Context) {
 
     private val twoLinePaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.SUBPIXEL_TEXT_FLAG)
     private val sideDatePaint by lazy {
-        Paint(Paint.ANTI_ALIAS_FLAG or Paint.SUBPIXEL_TEXT_FLAG).apply { typeface = CoverClockStyle.dateTypeface() }
+        val font = CoverClockLayout.dateFont(context)
+        Paint(Paint.ANTI_ALIAS_FLAG or Paint.SUBPIXEL_TEXT_FLAG).apply {
+            typeface = font.typeface
+            letterSpacing = font.letterSpacing
+        }
     }
     private val dateBounds = Rect()
 

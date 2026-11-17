@@ -103,11 +103,11 @@ When you customize your cover face in **Wallpaper & style**, Samsung saves a ren
 | **Single-line** (`13:49  Sun 15 November`) | Z Flip6 | Samsung's `ClockModex` system font |
 | **Stacked** (date over large digits) | Z Flip8 | Samsung's own digit vector paths (`big_clock_num_*`), stroked as rounded lines at the template's thickness, or the preset's clock font when it uses one |
 | **Hours over minutes** (`12` over `45`, date above or below, left, centred or right) | Z Flip8 | Samsung's clock fonts, or its rounded or layered digit paths (`layered_clock_num_*`), whichever matches the template |
-| **Sideways** (`Wed 1 February 12:45` reading upwards) | Z Flip8 | Samsung's clock font for the time; the date in a close system font |
-| **Analog** (numerals or ticks, round-ended hands) | Z Flip8 | The template's own dial with live hands measured from it (length, width, centre pin, a ticking second hand with its tail); the date in a close system font. Dials with shaped or illustrated hands show no clock |
-
-FlipFix works out which font, weight, digit set and thickness a preset uses by drawing each candidate and comparing it with the preset's template, once per preset.
+| **Sideways** (`Wed 1 February 12:45` reading upwards) | Z Flip8 | Samsung's clock font for the time; the date in SamsungOne UI |
+| **Analog** (numerals or ticks, round-ended hands) | Z Flip8 | The template's own dial with live hands measured from it (length, width, centre pin, a ticking second hand with its tail); the date in SamsungOne UI. Dials with shaped or illustrated hands show no clock |
 | **Any other style** | — | Hides the clock as a safe fallback rather than rendering a mismatched layout |
+
+FlipFix works out which font, weight, digit set and thickness a preset uses by drawing each candidate and comparing it with the preset's template, once per preset. On the Z Flip8 the date line is in SamsungOne UI, loaded from Samsung's own font package on the phone (with a close system font if that package is missing).
 
 > **Why is the weather space empty on the stacked clock?** Samsung pulls cover-screen weather from a private system provider that standard apps cannot read. Rather than requesting internet and location permissions to fetch third-party weather, FlipFix keeps the date in its exact original position and leaves the weather slot clean.
 

@@ -169,8 +169,6 @@ sealed interface CoverClockLayout {
         /** Letters with ascenders: the template's date ("Wed 1 Feb") is sized by its tallest letters. */
         const val ASCENDERS = "bd"
 
-        const val DATE_LETTER_SPACING = -0.02f
-
         /** The clock of the active cover preset (see CoverFaceMatcher), or [Unknown] for no clock. */
         fun load(context: Context): CoverClockLayout {
             val file = CoverFaceMatcher.activeTemplate(context) ?: return Unknown
@@ -243,7 +241,7 @@ sealed interface CoverClockLayout {
                     stacked(context, t, bands[0], bands[1], "${file.path}@${file.lastModified()}")
                 else -> twoLine(context, t, "${file.path}@${file.lastModified()}").takeIf { it != Unknown }
                     ?: sideways(context, t, "${file.path}@${file.lastModified()}").takeIf { it != Unknown }
-                    ?: CoverClockAnalog.parse(t)
+                    ?: CoverClockAnalog.parse(t, dateFont(context))
             }
             Log.d(CoverState.TAG, "cover clock from ${file.parentFile?.name}: bands=$bands -> $layout")
             return layout
@@ -279,7 +277,7 @@ sealed interface CoverClockLayout {
                 val inkCenter = (hoursRect.exactCenterX() + minutesRect.exactCenterX()) / 2
                 val align = alignOf(inkCenter, t.w)
                 val color = t.opaqueColor(hours) ?: Color.WHITE
-                val d = dateFields(t, dateRect, align, color) ?: return Unknown
+                val d = dateFields(t, dateRect, align, color, dateFont(context)) ?: return Unknown
                 return TwoLine(
                     font = "", weight = 0, align = align, anchorXFrac = 0f, textSizeFrac = 0f,
                     hoursBaselineFrac = 0f, minutesBaselineFrac = 0f, color = color,
@@ -340,7 +338,7 @@ sealed interface CoverClockLayout {
                 Align.RIGHT -> lines.indices.map { origins[it] + advances[it] }.average().toFloat()
             }
             val color = t.opaqueColor(Band(firstRect.top, firstRect.bottom - 1)) ?: Color.WHITE
-            val d = dateFields(t, dateRect, align, color) ?: return Unknown
+            val d = dateFields(t, dateRect, align, color, dateFont(context)) ?: return Unknown
             return TwoLine(
                 font = font.font,
                 weight = font.weight,
@@ -363,14 +361,16 @@ sealed interface CoverClockLayout {
 
         /**
          * The date line at [rect]: sample "Wed 1 February" or "Wed 1 Feb" (whichever has its proportions),
-         * sized by its ink height (system stand-in font), anchored by its ink like the clock ([align]).
+         * sized by its ink height in [font], anchored by its ink like the clock ([align]).
          */
-        internal fun dateFields(t: Template, rect: android.graphics.Rect, align: Align, fallbackColor: Int): DateFields? {
+        internal fun dateFields(
+            t: Template, rect: android.graphics.Rect, align: Align, fallbackColor: Int, font: DateFont,
+        ): DateFields? {
             if (rect.height() <= 0) return null
             val r = android.graphics.Rect()
             val datePaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
-                typeface = stackedDateTypeface()
-                letterSpacing = DATE_LETTER_SPACING
+                typeface = font.typeface
+                letterSpacing = font.letterSpacing
                 textSize = 100f
             }
             val inkAspect = rect.width().toFloat() / rect.height()
@@ -448,9 +448,10 @@ sealed interface CoverClockLayout {
             timePaint.getTextBounds(SAMPLE_TIME, 0, SAMPLE_TIME.length, r)
             val timeBaseline = timeRect.bottom - r.bottom.toFloat()
 
-            // Date: Samsung's date font isn't readable; a close system font, stretched to the template's width.
+            // Date: Samsung's date font, stretched to the template's width (a no-op unless the stand-in is used).
+            val dateFont = dateFont(context)
             val datePaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
-                typeface = CoverClockStyle.dateTypeface(); textSize = 100f
+                typeface = dateFont.typeface; letterSpacing = dateFont.letterSpacing; textSize = 100f
             }
             val inkAspect = (dateRight - dateLeft).toFloat() / dateBand.height
             fun aspect(s: String) = r.also { datePaint.getTextBounds(s, 0, s.length, it) }
@@ -526,11 +527,38 @@ sealed interface CoverClockLayout {
             )
         }
 
-        /** Same as the one-line style's date: system Roboto Flex (closest to Samsung's date width). */
-        fun stackedDateTypeface(): Typeface = runCatching {
-            Typeface.Builder(File("/system/fonts/RobotoFlex-Regular.ttf")).setFontVariationSettings("'wght' 375").build()
-        }.getOrNull() ?: Typeface.DEFAULT
+        @Volatile private var dateFontCache: DateFont? = null
+
+        /**
+         * The date font of the Z Flip8 cover clocks (every style but the Z Flip6 one-line clock):
+         * SamsungOne UI, which ships in Samsung's font package and is loaded from there at runtime (nothing
+         * of Samsung's is bundled), at its natural spacing. Without that package, the closest system
+         * stand-in: Roboto Flex, slightly tightened.
+         */
+        fun dateFont(context: Context): DateFont {
+            dateFontCache?.let { return it }
+            val samsung = runCatching {
+                val fonts = context.createPackageContext(SAMSUNG_ONE_PACKAGE, 0)
+                Typeface.Builder(fonts.assets, SAMSUNG_ONE_DATE_FONT).build()
+            }.onFailure { Log.w(CoverState.TAG, "SamsungOne date font unavailable, using Roboto Flex", it) }.getOrNull()
+            val font = if (samsung != null) {
+                DateFont(samsung, 0f)
+            } else {
+                val flex = runCatching {
+                    Typeface.Builder(File("/system/fonts/RobotoFlex-Regular.ttf")).setFontVariationSettings("'wght' 375").build()
+                }.getOrNull()
+                DateFont(flex ?: Typeface.DEFAULT, -0.02f)
+            }
+            Log.d(CoverState.TAG, "date font: ${if (samsung != null) "SamsungOne UI" else "Roboto Flex stand-in"}")
+            return font.also { dateFontCache = it }
+        }
+
+        private const val SAMSUNG_ONE_PACKAGE = "com.monotype.android.font.samsungone"
+        private const val SAMSUNG_ONE_DATE_FONT = "fonts/SamsungOneUI-Regular.ttf"
     }
+
+    /** A date line's font, with the letter spacing that makes it match Samsung's (see [dateFont]). */
+    class DateFont(val typeface: Typeface, val letterSpacing: Float)
 
     /** A horizontal strip of the template that contains ink, rows [top, bottom]. */
     data class Band(val top: Int, val bottom: Int) {

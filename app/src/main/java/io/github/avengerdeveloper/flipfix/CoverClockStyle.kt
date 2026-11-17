@@ -82,6 +82,7 @@ data class CoverClockStyle(
         }.onFailure { Log.w(CoverState.TAG, "Samsung clock font unavailable", it) }
             .getOrNull() ?: Typeface.create("sans-serif-condensed", Typeface.BOLD)
 
+        /** The Z Flip6 one-line clock's date (calibrated there; the Z Flip8 styles use CoverClockLayout.dateFont). */
         fun dateTypeface(): Typeface = runCatching {
             Typeface.Builder(File("/system/fonts/RobotoFlex-Regular.ttf"))
                 .setFontVariationSettings("'wght' $DATE_WEIGHT")
