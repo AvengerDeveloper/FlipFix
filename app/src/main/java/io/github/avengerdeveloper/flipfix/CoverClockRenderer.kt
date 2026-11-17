@@ -150,6 +150,9 @@ class CoverClockRenderer(private val context: Context) {
             DateFormat.getBestDateTimePattern(locale, if (l.dateLongMonth) "EEEdMMMM" else "EEEdMMM"), now,
         ).toString()
         twoLinePaint.typeface = tf
+        twoLinePaint.fontFeatureSettings = null
+        twoLinePaint.letterSpacing = 0f
+        twoLinePaint.shader = null
         twoLinePaint.textSize = l.timeTextSizeFrac * screenH
         twoLinePaint.color = l.color or 0xFF000000.toInt()
         twoLinePaint.getTextBounds(timeText, 0, timeText.length, bounds)
@@ -191,32 +194,43 @@ class CoverClockRenderer(private val context: Context) {
         var digitsInkRight = Float.NEGATIVE_INFINITY
         if (p != null) {
             // Fixed slots: each line sits exactly where the template's sample does.
+            val pathColor = (l.shade?.middle(opaque) ?: opaque) or 0xFF000000.toInt()
             drawPathDigits(
                 canvas, "12", hours, p.hoursLeftFrac * screenW - offX, p.hoursBottomFrac * screenH - offY,
-                p.heightFrac * screenH, opaque, p.topAlpha, p.thickness, p.digitSet,
+                p.heightFrac * screenH, pathColor, p.topAlpha, p.thickness, p.digitSet,
             )
             drawPathDigits(
                 canvas, "45", minutes, p.minutesLeftFrac * screenW - offX, p.minutesBottomFrac * screenH - offY,
-                p.heightFrac * screenH, opaque, p.topAlpha, p.thickness, p.digitSet,
+                p.heightFrac * screenH, pathColor, p.topAlpha, p.thickness, p.digitSet,
             )
         } else {
             val tf = CoverClockFonts.typeface(context, l.font, l.weight) ?: return
             twoLinePaint.typeface = tf
             twoLinePaint.textSize = l.textSizeFrac * screenH
             twoLinePaint.color = opaque
+            twoLinePaint.shader = l.shade?.let {
+                LinearGradient(
+                    0f, it.topFrac * screenH - offY, 0f, it.bottomFrac * screenH - offY,
+                    opaque, it.bottomColor or 0xFF000000.toInt(), Shader.TileMode.CLAMP,
+                )
+            }
+            twoLinePaint.fontFeatureSettings = if (l.spacing != null) CoverClockFonts.NO_KERNING else null
+            twoLinePaint.letterSpacing = l.spacing ?: 0f
             val anchor = l.anchorXFrac * screenW
             val lines = if (l.oneLine) {
                 listOf(DateFormat.format(timePattern(locale), now).toString() to l.hoursBaselineFrac)
             } else {
                 listOf(hours to l.hoursBaselineFrac, minutes to l.minutesBaselineFrac)
             }
-            for ((text, baseline) in lines) {
-                val adv = twoLinePaint.measureText(text)
-                val x = when (l.align) {
-                    CoverClockLayout.Align.LEFT -> anchor
-                    CoverClockLayout.Align.CENTER -> anchor - adv / 2
-                    CoverClockLayout.Align.RIGHT -> anchor - adv
-                }
+            // The lines form a block as wide as the widest, placed at the anchor; each line sits in it as
+            // Samsung aligns the lines with each other.
+            val advances = lines.map { twoLinePaint.measureText(it.first) }
+            val blockW = advances.max()
+            val blockLeft = anchor - blockW * CoverClockLayout.share(l.align)
+            val lineShare = CoverClockLayout.share(l.lineAlign ?: l.align)
+            for ((i, line) in lines.withIndex()) {
+                val (text, baseline) = line
+                val x = blockLeft + (blockW - advances[i]) * lineShare
                 canvas.drawText(text, x - offX, baseline * screenH - offY, twoLinePaint)
                 twoLinePaint.getTextBounds(text, 0, text.length, bounds)
                 digitsInkRight = maxOf(digitsInkRight, x + bounds.right)
