@@ -101,6 +101,20 @@ object CoverState {
     @Volatile var coverActivity: WeakReference<Activity>? = null
 
     /**
+     * The face's clock or widgets changed while it was hidden (another cover preset), so the screenshot
+     * Android took of it as it went away, which it shows first when the face comes back, is out of date.
+     * While locked the face redraws behind the lock screen at once (CoverActivity); otherwise the next
+     * launch has Android skip it (CoverAccessibilityService.maybeLaunch). Cleared once the face shows.
+     */
+    @Volatile var faceOutdated = false
+
+    /**
+     * On a launch of the face: Android shows its screenshot of a hidden face first only for a launch like
+     * the last one without extras, so a launch carrying this has it skip an out-of-date one.
+     */
+    const val EXTRA_REDRAWN = "io.github.avengerdeveloper.flipfix.REDRAWN"
+
+    /**
      * When the user last opened a notification (SystemClock.uptimeMillis), e.g. tapping WhatsApp's on the
      * locked cover: Samsung opens that app as the unlock completes, and it must stay in front of FlipFix.
      */

@@ -317,13 +317,23 @@ class CoverAccessibilityService : AccessibilityService() {
         // From the edge peek, the card hands over by itself once FlipFix has drawn (EdgeReturn.awaitFace).
         if (reason != EDGE_REASON) edge.hide()
         val coverId = CoverState.coverDisplayId(displayManager)
-        val options = ActivityOptions.makeBasic().setLaunchDisplayId(coverId)
-        // CoverActivity stays alive in the background (singleTask), so this usually just brings it forward.
+        // CoverActivity stays alive in the background (singleTask), so this usually just brings it forward,
+        // with Android's screenshot of it showing until it has drawn.
         val intent = Intent(this, CoverActivity::class.java)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
+        val outdated = CoverState.faceOutdated
+        val options = if (outdated) {
+            // That screenshot shows the old clock: skip it. The face then appears as soon as it has drawn
+            // (without an animation, so Samsung's widget page under it doesn't show through a fade).
+            intent.putExtra(CoverState.EXTRA_REDRAWN, true)
+            ActivityOptions.makeCustomAnimation(this, 0, 0)
+        } else {
+            ActivityOptions.makeBasic()
+        }
+        options.setLaunchDisplayId(coverId)
         try {
             startActivity(intent, options.toBundle())
-            Log.i(CoverState.TAG, "launched cover face on display $coverId ($reason)")
+            Log.i(CoverState.TAG, "launched cover face on display $coverId ($reason${if (outdated) ", redrawn" else ""})")
         } catch (t: Throwable) {
             Log.e(CoverState.TAG, "launch failed ($reason)", t)
         }
