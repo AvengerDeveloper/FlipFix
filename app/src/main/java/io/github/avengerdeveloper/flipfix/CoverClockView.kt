@@ -21,8 +21,8 @@ class CoverClockView @JvmOverloads constructor(
 
     private var layout = CoverClockLayout.load(context)
 
-    /** Offset of Samsung's clock from the template's, as measured on the lock screen (cover fractions). */
-    private var shift = CoverFaceMatcher.activeShift(context)
+    /** Offset and size of Samsung's clock against the template's, as measured on the lock screen. */
+    private var placement = CoverFaceMatcher.activePlacement(context)
     private val renderer = CoverClockRenderer(context)
 
     /**
@@ -49,9 +49,9 @@ class CoverClockView @JvmOverloads constructor(
     fun reloadStyleAsync() {
         Thread {
             val fresh = CoverClockLayout.load(context)
-            val freshShift = CoverFaceMatcher.activeShift(context)
-            if (fresh != layout || freshShift != shift) post {
-                layout = fresh; shift = freshShift; invalidate()
+            val freshPlacement = CoverFaceMatcher.activePlacement(context)
+            if (fresh != layout || freshPlacement != placement) post {
+                layout = fresh; placement = freshPlacement; invalidate()
                 if (windowVisibility != VISIBLE) onChangedWhileHidden?.invoke()
             }
         }.start()
@@ -103,18 +103,28 @@ class CoverClockView @JvmOverloads constructor(
             getLocationOnScreen(location)
             val w = (windowBounds?.width() ?: width).toFloat()
             val h = (windowBounds?.height() ?: height).toFloat()
-            renderer.draw(
-                canvas, layout, Date(), w, h,
-                location[0] - shift.first * w, location[1] - shift.second * h,
-            )
+            drawPlaced(canvas, w, h, location[0] - placement.dx * w, location[1] - placement.dy * h)
         } else {
             // Drawn inside a moving/scaled card that represents the whole cover: lay out in the view's own
             // coordinates so the clock moves and scales with the card.
             val w = width.toFloat()
             val h = height.toFloat()
-            renderer.draw(canvas, layout, Date(), w, h, -shift.first * w, -shift.second * h)
+            drawPlaced(canvas, w, h, -placement.dx * w, -placement.dy * h)
         }
         // Only a drawn frame schedules the next one: off screen, the ticking stops by itself.
         scheduleSecondTick()
+    }
+
+    /** The clock on a [w] x [h] cover drawn at ([offX], [offY]), at the size Samsung shows it. */
+    private fun drawPlaced(canvas: Canvas, w: Float, h: Float, offX: Float, offY: Float) {
+        val p = placement
+        if (p.size == 1f) {
+            renderer.draw(canvas, layout, Date(), w, h, offX, offY)
+            return
+        }
+        val saved = canvas.save()
+        canvas.scale(p.size, p.size, p.pivotX * w - offX, p.pivotY * h - offY)
+        renderer.draw(canvas, layout, Date(), w, h, offX, offY)
+        canvas.restoreToCount(saved)
     }
 }

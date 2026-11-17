@@ -80,6 +80,34 @@ object CoverFaceMatcher {
     private const val KEY_SHIFT_X = "shift_x"
     private const val KEY_SHIFT_Y = "shift_y"
 
+    /**
+     * Clock sizes tried against Samsung's: Samsung's editor lets the user resize a preset's clock, and the
+     * template keeps the size it was made at. A walk in [SIZE_STEP]s from the template's size, as long as the
+     * clock fits better, then [FINE_SIZE_STEP]s around the best.
+     */
+    private const val MIN_SIZE = 0.6f
+    private const val MAX_SIZE = 1.6f
+    private const val SIZE_STEP = 0.05f
+    private const val FINE_SIZE_STEP = 0.01f
+    private const val FINE_SIZES = 4
+
+    /** A resized clock has to fit this much better than the template's size (noise doesn't resize it). */
+    private const val MIN_SIZE_GAIN = 0.02f
+
+    /**
+     * Presets (best fitting at the template's size first) whose clock size is fitted: the next one only while
+     * none fits at least [SURE_SCORE] (a clock resized a lot fits poorly at the template's size).
+     */
+    private const val SIZED_CANDIDATES = 2
+    private const val SURE_SCORE = 0.5f
+
+    /** While trying sizes: offsets tried around the last best one (comparison pixels). */
+    private const val NEAR_SHIFT = 4
+    private const val NEAR_STEP = 2
+    private const val KEY_SIZE = "size"
+    private const val KEY_PIVOT_X = "pivot_x"
+    private const val KEY_PIVOT_Y = "pivot_y"
+
     private val observers = CopyOnWriteArraySet<() -> Unit>()
     @Volatile private var lastUnstampedCheck = 0L
 
@@ -158,23 +186,71 @@ object CoverFaceMatcher {
 
         val renderer = CoverClockRenderer(context)
         val drawn = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
-        val canvas = Canvas(drawn).apply { scale(1f / SCALE, 1f / SCALE) }
         val clock = IntArray(w * h)
+
+        /** [layout] at [at], resized by [size] about ([pivotX], [pivotY]) (cover pixels), as a [Probe]. */
+        fun probeOf(layout: CoverClockLayout, size: Float = 1f, pivotX: Float = 0f, pivotY: Float = 0f): Probe? {
+            drawn.eraseColor(Color.TRANSPARENT)
+            val canvas = Canvas(drawn).apply {
+                scale(1f / SCALE, 1f / SCALE)
+                if (size != 1f) scale(size, size, pivotX, pivotY)
+            }
+            renderer.draw(canvas, layout, at, coverW.toFloat(), coverH.toFloat())
+            drawn.getPixels(clock, 0, w, 0, 0, w, h)
+            return probe(clock, w, h)
+        }
+
+        /** [c] at the size Samsung shows its clock in, if a size other than the template's fits clearly better. */
+        fun resized(c: Candidate): Candidate {
+            val p = c.probe ?: return c
+            // About the middle of the template's clock (Samsung's own pivot shows up as part of the offset).
+            val pivotX = p.centerX * SCALE
+            val pivotY = p.centerY * SCALE
+            fun at(size: Float, near: Fit): Candidate? {
+                val sized = probeOf(c.layout, size, pivotX, pivotY) ?: return null
+                val fit = bestFit(sized, screen, w, h, near.dx, near.dy, NEAR_SHIFT, NEAR_STEP)
+                return c.copy(probe = sized, fit = fit, size = size, pivotX = pivotX, pivotY = pivotY)
+            }
+            var best = c
+            for (direction in intArrayOf(1, -1)) {
+                var step = 1
+                while (true) {
+                    val size = 1f + direction * step * SIZE_STEP
+                    if (size < MIN_SIZE || size > MAX_SIZE) break
+                    val next = at(size, best.fit) ?: break
+                    if (next.fit.score <= best.fit.score) break
+                    best = next
+                    step++
+                }
+                if (best !== c) break
+            }
+            val coarse = best.size
+            for (i in -FINE_SIZES..FINE_SIZES) {
+                val size = Math.round((coarse + i * FINE_SIZE_STEP) * 100) / 100f
+                if (i == 0 || size == 1f || size < MIN_SIZE || size > MAX_SIZE) continue
+                val next = at(size, best.fit) ?: continue
+                if (next.fit.score > best.fit.score) best = next
+            }
+            return if (best.fit.score - c.fit.score >= MIN_SIZE_GAIN) best else c
+        }
+
         val fits = byLayout.map { (parsed, files) ->
             // The date drawn a shade apart from the digits, so the two are measured separately: Samsung may
             // tint the digits and leave the date white, though the template has both white.
             val layout = parsed.inkColors()?.let { (digits, date) -> parsed.withColors(digits, apart(date)) } ?: parsed
-            drawn.eraseColor(Color.TRANSPARENT)
-            renderer.draw(canvas, layout, at, coverW.toFloat(), coverH.toFloat())
-            drawn.getPixels(clock, 0, w, 0, 0, w, h)
-            val probe = probe(clock, w, h)
-            Triple(files, probe?.let { bestFit(it, screen, w, h) } ?: Fit(0f, 0, 0), Triple(parsed, layout, probe))
+            val probe = probeOf(layout)
+            Candidate(files, parsed, layout, probe, probe?.let { bestFit(it, screen, w, h) } ?: Fit(0f, 0, 0))
+        }.sortedByDescending { it.fit.score }.toMutableList().also { ranked ->
+            for (i in 0 until minOf(SIZED_CANDIDATES, ranked.size)) {
+                if (i > 0 && ranked.take(i).maxOf { it.fit.score } >= SURE_SCORE) break
+                ranked[i] = resized(ranked[i])
+            }
         }
         drawn.recycle()
 
-        val best = fits.maxByOrNull { it.second.score }
-        val matchedFit = best?.takeIf { it.second.score >= MIN_SCORE }
-        val matched = matchedFit?.first?.maxByOrNull { it.lastModified() }?.parentFile?.name
+        val best = fits.maxByOrNull { it.fit.score }
+        val matchedFit = best?.takeIf { it.fit.score >= MIN_SCORE }
+        val matched = matchedFit?.files?.maxByOrNull { it.lastModified() }?.parentFile?.name
         val p = prefs(context)
         val sameSwitch = p.getString(KEY_STAMP, null) == stamp
         val version = appVersion(context)
@@ -183,12 +259,15 @@ object CoverFaceMatcher {
         val edit = p.edit()
             .putString(KEY_STAMP, stamp)
             .putString(KEY_FOLDER, matched.orEmpty())
-            .putFloat(KEY_SHIFT_X, (matchedFit?.second?.dx ?: 0).toFloat() / w)
-            .putFloat(KEY_SHIFT_Y, (matchedFit?.second?.dy ?: 0).toFloat() / h)
+            .putFloat(KEY_SHIFT_X, (matchedFit?.fit?.dx ?: 0).toFloat() / w)
+            .putFloat(KEY_SHIFT_Y, (matchedFit?.fit?.dy ?: 0).toFloat() / h)
+            .putFloat(KEY_SIZE, matchedFit?.size ?: 1f)
+            .putFloat(KEY_PIVOT_X, (matchedFit?.pivotX ?: 0f) / coverW)
+            .putFloat(KEY_PIVOT_Y, (matchedFit?.pivotY ?: 0f) / coverH)
             .putInt(KEY_TRIES, tries)
             .putLong(KEY_VERSION, version)
         var colorInfo = ""
-        val shownColors = matchedFit?.let { (_, fit, drawn) -> clockColors(drawn.first, drawn.second, drawn.third, fit, w, h) }
+        val shownColors = matchedFit?.let { clockColors(it, w, h) }
         val brightness = (lumaSum / screen.size).toInt()
         val samePreset = sameSwitch && p.getString(KEY_FOLDER, null) == matched
         if (shownColors == null) {
@@ -200,7 +279,7 @@ object CoverFaceMatcher {
             colorInfo = ", shown in " + shownColors.describe()
         }
         edit.apply()
-        val scores = fits.map { it.first to it.second.score }
+        val scores = fits.map { it.files to it.fit.score }
         if (stamp == NO_STAMP) lastUnstampedCheck = SystemClock.uptimeMillis()
 
         Log.d(
@@ -208,7 +287,9 @@ object CoverFaceMatcher {
             "cover preset check (${SystemClock.uptimeMillis() - started} ms, try $tries, $shotInfo, " +
                 "${byLayout.size} drawable of ${CoverClockLayout.templates().size}): " +
                 (matched ?: "no match") +
-                (matchedFit?.second?.let { " shifted ${it.dx * SCALE},${it.dy * SCALE} px" } ?: "") + colorInfo + "; scores " +
+                (matchedFit?.let { " shifted ${it.fit.dx * SCALE},${it.fit.dy * SCALE} px" } ?: "") +
+                (matchedFit?.takeIf { it.size != 1f }?.let { " at ${"%.0f".format(it.size * 100)}% size" } ?: "") +
+                colorInfo + "; scores " +
                 scores.sortedByDescending { it.second }.joinToString { (files, s) ->
                     "${files.joinToString("+") { it.parentFile?.name.orEmpty() }}=${"%.2f".format(s)}"
                 },
@@ -218,14 +299,22 @@ object CoverFaceMatcher {
     }
 
     /**
-     * Where the shifted clock is (fractions of the cover), as Samsung's lock screen showed it for the active
-     * preset. Samsung's lock screen doesn't always put the clock exactly where the template has it (e.g. a
-     * right-aligned clock sits a little further right), so the check also finds that small offset.
+     * Where and how big Samsung's lock screen showed the active preset's clock, against the template:
+     * resized by [size] about ([pivotX], [pivotY]), then moved by ([dx], [dy]) (all in fractions of the
+     * cover). Samsung doesn't always put the clock exactly where the template has it (e.g. a right-aligned
+     * clock sits a little further right), and the user may have resized it in Samsung's editor.
      */
-    fun activeShift(context: Context): Pair<Float, Float> {
-        if (activeTemplate(context) == null) return 0f to 0f
+    data class Placement(
+        val dx: Float = 0f, val dy: Float = 0f, val size: Float = 1f, val pivotX: Float = 0f, val pivotY: Float = 0f,
+    )
+
+    fun activePlacement(context: Context): Placement {
+        if (activeTemplate(context) == null) return Placement()
         val p = prefs(context)
-        return p.getFloat(KEY_SHIFT_X, 0f) to p.getFloat(KEY_SHIFT_Y, 0f)
+        return Placement(
+            p.getFloat(KEY_SHIFT_X, 0f), p.getFloat(KEY_SHIFT_Y, 0f),
+            p.getFloat(KEY_SIZE, 1f), p.getFloat(KEY_PIVOT_X, 0f), p.getFloat(KEY_PIVOT_Y, 0f),
+        )
     }
 
     /**
@@ -259,17 +348,15 @@ object CoverFaceMatcher {
     }
 
     /**
-     * The digits' and the date's colours as Samsung shows them, from the matched [fit] of [drawnAs]'s
-     * drawing ([probe], [w] x [h]), or null for a clock FlipFix doesn't recolour. A colour that wasn't
-     * measured (no flat colour there) stays the template's own.
+     * The digits' and the date's colours as Samsung shows them, from the matched candidate [c] (drawn
+     * [w] x [h]), or null for a clock FlipFix doesn't recolour. A colour that wasn't measured (no flat
+     * colour there) stays the template's own.
      */
-    private fun clockColors(
-        parsed: CoverClockLayout, drawnAs: CoverClockLayout, probe: Probe?, fit: Fit, w: Int, h: Int,
-    ): ClockColors? {
-        val (digits, date) = parsed.inkColors() ?: return null
-        val (digitsDrawn, dateDrawn) = drawnAs.inkColors() ?: return null
-        val shown = fit.shown ?: return null
-        probe ?: return null
+    private fun clockColors(c: Candidate, w: Int, h: Int): ClockColors? {
+        val (digits, date) = c.parsed.inkColors() ?: return null
+        val (digitsDrawn, dateDrawn) = c.layout.inkColors() ?: return null
+        val shown = c.fit.shown ?: return null
+        val probe = c.probe ?: return null
         fun groupOf(drawnColor: Int) = probe.keys.indices.minByOrNull { distance(probe.keys[it], drawnColor or 0xFF000000.toInt()) }
         fun whole(g: Int?, own: Int): Int {
             g ?: return own
@@ -295,7 +382,10 @@ object CoverFaceMatcher {
         if (lowerY - upperY < 1f) return ClockColors(whole(g, digits), dateShown)
         val topColor = mix(upper, lower, -(upperY - top) / (lowerY - upperY))
         val bottomColor = mix(upper, lower, 1f + (bottom - lowerY) / (lowerY - upperY))
-        return ClockColors(topColor, dateShown, CoverClockLayout.Shade(bottomColor, top / h, bottom / h))
+        // The face resizes the whole drawing, shading included: give the rows as drawn at the template's size.
+        val pivotY = c.pivotY / SCALE
+        fun unsized(row: Float) = pivotY + (row - pivotY) / c.size
+        return ClockColors(topColor, dateShown, CoverClockLayout.Shade(bottomColor, unsized(top) / h, unsized(bottom) / h))
     }
 
     /** [a] moved [t] of the way to [b] (t outside 0..1 carries on past them), each channel kept in range. */
@@ -318,10 +408,11 @@ object CoverFaceMatcher {
      * digits' and the date's) number the groups: [byGroup] lists each group's ink pixels (indices into
      * [ink]), [ringGroup] the colour each ring pixel should not have. [splitY]: per group, the last row of
      * its upper half (Samsung may shade a colour from top to bottom, so each half is measured on its own).
+     * ([centerX], [centerY]): the middle of the ink's box.
      */
     private class Probe(
         val ink: IntArray, val byGroup: Array<IntArray>, val ring: IntArray, val ringGroup: IntArray, val keys: IntArray,
-        val splitY: IntArray,
+        val splitY: IntArray, val centerX: Float, val centerY: Float,
     ) {
         /** Index into [shownColors]'s result for [group] at [row]. */
         fun part(group: Int, row: Int) = 2 * group + (if (row > splitY[group]) 1 else 0)
@@ -329,6 +420,15 @@ object CoverFaceMatcher {
 
     /** [shown]: per colour group's upper and lower half, the colour Samsung's lock screen shows it in (see [shownColors]). */
     private class Fit(val score: Float, val dx: Int, val dy: Int, val shown: Array<Int?>? = null)
+
+    /**
+     * A preset ([files] share one clock, [parsed]) as compared: drawn as [layout], resized by [size] about
+     * ([pivotX], [pivotY]) (cover pixels), giving [probe], whose best placement on the lock screen is [fit].
+     */
+    private data class Candidate(
+        val files: List<File>, val parsed: CoverClockLayout, val layout: CoverClockLayout, val probe: Probe?,
+        val fit: Fit, val size: Float = 1f, val pivotX: Float = 0f, val pivotY: Float = 0f,
+    )
 
     private fun probe(clock: IntArray, w: Int, h: Int): Probe? {
         var x0 = w; var y0 = h; var x1 = -1; var y1 = -1
@@ -365,7 +465,10 @@ object CoverFaceMatcher {
             val rows = byGroup[g].map { ink[it] / w }.sorted()
             rows.getOrElse(rows.size / 2) { 0 }
         }
-        return Probe(ink.toIntArray(), byGroup, ring.toIntArray(), ringGroup, keys.toIntArray(), splitY)
+        return Probe(
+            ink.toIntArray(), byGroup, ring.toIntArray(), ringGroup, keys.toIntArray(), splitY,
+            (x0 + x1 + 1) / 2f, (y0 + y1 + 1) / 2f,
+        )
     }
 
     /**
@@ -426,15 +529,22 @@ object CoverFaceMatcher {
     private fun distance(a: Int, b: Int) =
         abs(Color.red(a) - Color.red(b)) + abs(Color.green(a) - Color.green(b)) + abs(Color.blue(a) - Color.blue(b))
 
-    /** The best [score] with the drawn clock moved by up to [MAX_SHIFT] comparison pixels each way. */
-    private fun bestFit(p: Probe, screen: IntArray, w: Int, h: Int): Fit {
-        var best = Fit(score(p, screen, w, h, 0, 0), 0, 0)
-        for (dy in -MAX_SHIFT..MAX_SHIFT step SHIFT_STEP) for (dx in -MAX_SHIFT..MAX_SHIFT step SHIFT_STEP) {
+    /**
+     * The best [score] with the drawn clock moved by up to [reach] comparison pixels each way from
+     * ([fromX], [fromY]) in [step]s, then pixel by pixel around the best; never more than [MAX_SHIFT] in all.
+     */
+    private fun bestFit(
+        p: Probe, screen: IntArray, w: Int, h: Int,
+        fromX: Int = 0, fromY: Int = 0, reach: Int = MAX_SHIFT, step: Int = SHIFT_STEP,
+    ): Fit {
+        var best = Fit(score(p, screen, w, h, fromX, fromY), fromX, fromY)
+        for (dy in fromY - reach..fromY + reach step step) for (dx in fromX - reach..fromX + reach step step) {
+            if (abs(dx) > MAX_SHIFT || abs(dy) > MAX_SHIFT) continue
             val s = score(p, screen, w, h, dx, dy)
             if (s > best.score) best = Fit(s, dx, dy)
         }
         val (cx, cy) = best.dx to best.dy
-        for (dy in cy - SHIFT_STEP + 1 until cy + SHIFT_STEP) for (dx in cx - SHIFT_STEP + 1 until cx + SHIFT_STEP) {
+        for (dy in cy - step + 1 until cy + step) for (dx in cx - step + 1 until cx + step) {
             if (abs(dx) > MAX_SHIFT || abs(dy) > MAX_SHIFT) continue
             val s = score(p, screen, w, h, dx, dy)
             if (s > best.score) best = Fit(s, dx, dy)
