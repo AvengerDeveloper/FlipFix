@@ -90,6 +90,13 @@ class CoverActivity : Activity() {
             finish()
             return
         }
+        if (CoverState.notificationJustOpened()) {
+            // Brought forward by the unlock a moment before the tapped notification's app opened (the
+            // two land within milliseconds): that app goes in front.
+            Log.d(CoverState.TAG, "stepping aside on resume: a notification's app is opening")
+            moveTaskToBack(true)
+            return
+        }
         CoverState.showing = true
         // Undo the slide-out from the last dismissal: FlipFix comes back in place, exactly where the edge
         // peek (or Samsung's lock screen) left the face.

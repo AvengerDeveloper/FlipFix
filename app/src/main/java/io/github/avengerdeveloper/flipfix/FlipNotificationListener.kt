@@ -93,6 +93,7 @@ class FlipNotificationListener : NotificationListenerService() {
             Log.d(CoverState.TAG, "notification from $pkg opened")
         }
     }
+
     override fun onNotificationRankingUpdate(rankingMap: RankingMap?) = publishIcons()
 
     /**

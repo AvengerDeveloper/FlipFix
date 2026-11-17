@@ -106,9 +106,16 @@ object CoverState {
      */
     @Volatile var notificationOpenedAt = 0L
 
-    /** True for a few seconds after a notification was opened (FlipFix then doesn't come forward). */
+    /** When the user last brought FlipFix back with the edge swipe (SystemClock.uptimeMillis). */
+    @Volatile var edgeReturnAt = 0L
+
+    /**
+     * True for a few seconds after a notification was opened (FlipFix then doesn't come forward), unless
+     * the user has swiped FlipFix back in since.
+     */
     fun notificationJustOpened(now: Long = android.os.SystemClock.uptimeMillis()) =
-        notificationOpenedAt != 0L && now - notificationOpenedAt < NOTIFICATION_OPEN_GRACE_MS
+        notificationOpenedAt != 0L && now - notificationOpenedAt < NOTIFICATION_OPEN_GRACE_MS &&
+            notificationOpenedAt > edgeReturnAt
 
     private const val NOTIFICATION_OPEN_GRACE_MS = 3_000L
 

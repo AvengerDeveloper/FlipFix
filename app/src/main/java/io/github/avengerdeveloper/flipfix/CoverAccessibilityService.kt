@@ -300,6 +300,7 @@ class CoverAccessibilityService : AccessibilityService() {
             !CoverState.isCoverOn(displayManager, powerManager) -> "cover screen not on"
             keyguardManager.isKeyguardLocked -> "still locked"
             // The unlock was for a notification's app: that app goes in front. Swiping back still works.
+            // (If the tap is reported a moment after this check, the face steps aside as it appears.)
             reason != EDGE_REASON && CoverState.notificationJustOpened() -> "a notification's app is opening"
             else -> null
         }
@@ -311,6 +312,7 @@ class CoverAccessibilityService : AccessibilityService() {
         val now = SystemClock.uptimeMillis()
         if (now - lastLaunchAt < RELAUNCH_GUARD_MS) return
         lastLaunchAt = now
+        if (reason == EDGE_REASON) CoverState.edgeReturnAt = now
         handler.removeCallbacks(unlockPoll)
         // From the edge peek, the card hands over by itself once FlipFix has drawn (EdgeReturn.awaitFace).
         if (reason != EDGE_REASON) edge.hide()
