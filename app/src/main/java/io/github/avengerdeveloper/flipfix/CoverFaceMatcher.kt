@@ -146,6 +146,9 @@ object CoverFaceMatcher {
         if (stamp != now) return true
         // After an update: look again (it may draw this clock now, or read its place and colours better).
         if (p.getLong(KEY_VERSION, -1) != appVersion(context)) return true
+        // The widgets' blurred look is kept in memory only: look again once after a restart, and again
+        // while they may still be fading in.
+        if (CoverWidgets.row?.stamp != now || CoverWidgets.wantsAnotherLook(now)) return true
         // Nothing matched: try a few more wakes.
         return p.getString(KEY_FOLDER, "").isNullOrEmpty() && p.getInt(KEY_TRIES, 0) < MAX_TRIES
     }
@@ -157,7 +160,8 @@ object CoverFaceMatcher {
      * Compares [shot] (Samsung's locked cover, taken at [at] while [stamp] was current) with every
      * preset's clock and records the active preset. Runs off the main thread; recycles [shot].
      * [newTry]: the first snapshot of a wake (later snapshots of the same wake count as the same try).
-     * Returns whether another snapshot is worth taking (nothing matched, but some preset could have).
+     * Returns whether another snapshot is worth taking (nothing matched, but some preset could have; or
+     * no widgets showed yet, see CoverWidgets.wantsAnotherLook).
      */
     fun match(context: Context, shot: Bitmap, at: Date, stamp: String, newTry: Boolean): Boolean {
         val started = SystemClock.uptimeMillis()
@@ -204,8 +208,8 @@ object CoverFaceMatcher {
         fun resized(c: Candidate): Candidate {
             val p = c.probe ?: return c
             // About the middle of the template's clock (Samsung's own pivot shows up as part of the offset).
-            val pivotX = p.centerX * SCALE
-            val pivotY = p.centerY * SCALE
+            val pivotX = p.box.centerX() * SCALE
+            val pivotY = p.box.centerY() * SCALE
             fun at(size: Float, near: Fit): Candidate? {
                 val sized = probeOf(c.layout, size, pivotX, pivotY) ?: return null
                 val fit = bestFit(sized, screen, w, h, near.dx, near.dy, NEAR_SHIFT, NEAR_STEP)
@@ -269,6 +273,9 @@ object CoverFaceMatcher {
         var colorInfo = ""
         val shownColors = matchedFit?.let { clockColors(it, w, h) }
         val brightness = (lumaSum / screen.size).toInt()
+        // Where the clock is on Samsung's lock screen: the matched drawing's ink, as placed by the fit.
+        val clockOnScreen = matchedFit?.probe?.box?.let { android.graphics.RectF(it).apply { offset(matchedFit.fit.dx.toFloat(), matchedFit.fit.dy.toFloat()) } }
+        val widgetInfo = CoverWidgets.look(stamp, matched, brightness, screen, w, h, clockOnScreen, matchedFit?.parsed?.alignment())
         val samePreset = sameSwitch && p.getString(KEY_FOLDER, null) == matched
         if (shownColors == null) {
             edit.remove(KEY_COLORS)
@@ -289,13 +296,13 @@ object CoverFaceMatcher {
                 (matched ?: "no match") +
                 (matchedFit?.let { " shifted ${it.fit.dx * SCALE},${it.fit.dy * SCALE} px" } ?: "") +
                 (matchedFit?.takeIf { it.size != 1f }?.let { " at ${"%.0f".format(it.size * 100)}% size" } ?: "") +
-                colorInfo + "; scores " +
+                colorInfo + widgetInfo + "; scores " +
                 scores.sortedByDescending { it.second }.joinToString { (files, s) ->
                     "${files.joinToString("+") { it.parentFile?.name.orEmpty() }}=${"%.2f".format(s)}"
                 },
         )
         observers.forEach { it() }
-        return matched == null && byLayout.isNotEmpty()
+        return (matched == null && byLayout.isNotEmpty()) || CoverWidgets.wantsAnotherLook(stamp)
     }
 
     /**
@@ -408,11 +415,11 @@ object CoverFaceMatcher {
      * digits' and the date's) number the groups: [byGroup] lists each group's ink pixels (indices into
      * [ink]), [ringGroup] the colour each ring pixel should not have. [splitY]: per group, the last row of
      * its upper half (Samsung may shade a colour from top to bottom, so each half is measured on its own).
-     * ([centerX], [centerY]): the middle of the ink's box.
+     * [box]: the ink's bounding box (right and bottom exclusive).
      */
     private class Probe(
         val ink: IntArray, val byGroup: Array<IntArray>, val ring: IntArray, val ringGroup: IntArray, val keys: IntArray,
-        val splitY: IntArray, val centerX: Float, val centerY: Float,
+        val splitY: IntArray, val box: android.graphics.RectF,
     ) {
         /** Index into [shownColors]'s result for [group] at [row]. */
         fun part(group: Int, row: Int) = 2 * group + (if (row > splitY[group]) 1 else 0)
@@ -467,7 +474,7 @@ object CoverFaceMatcher {
         }
         return Probe(
             ink.toIntArray(), byGroup, ring.toIntArray(), ringGroup, keys.toIntArray(), splitY,
-            (x0 + x1 + 1) / 2f, (y0 + y1 + 1) / 2f,
+            android.graphics.RectF(x0.toFloat(), y0.toFloat(), x1 + 1f, y1 + 1f),
         )
     }
 

@@ -25,6 +25,9 @@ class CoverClockView @JvmOverloads constructor(
     private var placement = CoverFaceMatcher.activePlacement(context)
     private val renderer = CoverClockRenderer(context)
 
+    /** Blurred stand-ins for the widgets Samsung's lock screen shows under this clock (see CoverWidgets). */
+    private var widgets = CoverWidgets.active(context)
+
     /**
      * True (default): pinned to the cover display, wherever the view sits. False: lays out in its own
      * bounds, for the edge-peek card that represents the whole cover while it slides and scales.
@@ -50,8 +53,9 @@ class CoverClockView @JvmOverloads constructor(
         Thread {
             val fresh = CoverClockLayout.load(context)
             val freshPlacement = CoverFaceMatcher.activePlacement(context)
-            if (fresh != layout || freshPlacement != placement) post {
-                layout = fresh; placement = freshPlacement; invalidate()
+            val freshWidgets = CoverWidgets.active(context)
+            if (fresh != layout || freshPlacement != placement || freshWidgets !== widgets) post {
+                layout = fresh; placement = freshPlacement; widgets = freshWidgets; invalidate()
                 if (windowVisibility != VISIBLE) onChangedWhileHidden?.invoke()
             }
         }.start()
@@ -104,12 +108,15 @@ class CoverClockView @JvmOverloads constructor(
             val w = (windowBounds?.width() ?: width).toFloat()
             val h = (windowBounds?.height() ?: height).toFloat()
             drawPlaced(canvas, w, h, location[0] - placement.dx * w, location[1] - placement.dy * h)
+            // Measured where Samsung's lock screen shows them: no template offset or resize.
+            CoverWidgets.draw(canvas, widgets, w, h, location[0].toFloat(), location[1].toFloat())
         } else {
             // Drawn inside a moving/scaled card that represents the whole cover: lay out in the view's own
             // coordinates so the clock moves and scales with the card.
             val w = width.toFloat()
             val h = height.toFloat()
             drawPlaced(canvas, w, h, -placement.dx * w, -placement.dy * h)
+            CoverWidgets.draw(canvas, widgets, w, h, 0f, 0f)
         }
         // Only a drawn frame schedules the next one: off screen, the ticking stops by itself.
         scheduleSecondTick()

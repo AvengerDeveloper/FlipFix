@@ -178,6 +178,12 @@ sealed interface CoverClockLayout {
 
     data object Unknown : CoverClockLayout
 
+    /** How the clock lines up on the cover, where the style says (null: judge from where its ink sits). */
+    fun alignment(): Align? = when (this) {
+        is TwoLine -> align
+        else -> null
+    }
+
     /** The digits' and the date's colours as the template has them, or null (a style FlipFix doesn't recolour). */
     fun inkColors(): Pair<Int, Int>? = when (this) {
         is TwoLine -> color to dateColor
