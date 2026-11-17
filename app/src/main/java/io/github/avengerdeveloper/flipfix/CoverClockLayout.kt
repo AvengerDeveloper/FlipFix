@@ -71,6 +71,12 @@ sealed interface CoverClockLayout {
         val oneLine: Boolean = false,
         /** Set: the digits are Samsung's rounded path digits (SamsungClockDigits), not a font. */
         val paths: PathLines? = null,
+        /**
+         * Set (right-aligned font digits): the date's ink ends this far (fraction of the cover width) past
+         * the digit lines' ink, as on Samsung's lock screen, where it moves with the digits' width ("38"
+         * reaches further right than the template's "45"); [dateAnchorXFrac] is then unused.
+         */
+        val dateGapFrac: Float? = null,
     ) : CoverClockLayout
 
     /** Hours over minutes in Samsung's path digits: each line's ink left and bottom, ink height, fade. */
@@ -354,6 +360,7 @@ sealed interface CoverClockLayout {
                 dateBaselineFrac = d.baseline / t.h,
                 dateColor = d.color,
                 oneLine = lines.size == 1,
+                dateGapFrac = if (align == Align.RIGHT) (d.anchor - lines.maxOf { it.second.right }) / t.w else null,
             )
         }
 

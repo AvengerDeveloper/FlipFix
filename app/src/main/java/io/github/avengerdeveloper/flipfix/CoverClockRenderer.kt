@@ -188,6 +188,7 @@ class CoverClockRenderer(private val context: Context) {
         val minutes = DateFormat.format("mm", now).toString()
         val opaque = l.color or 0xFF000000.toInt()
         val p = l.paths
+        var digitsInkRight = Float.NEGATIVE_INFINITY
         if (p != null) {
             // Fixed slots: each line sits exactly where the template's sample does.
             drawPathDigits(
@@ -217,11 +218,19 @@ class CoverClockRenderer(private val context: Context) {
                     CoverClockLayout.Align.RIGHT -> anchor - adv
                 }
                 canvas.drawText(text, x - offX, baseline * screenH - offY, twoLinePaint)
+                twoLinePaint.getTextBounds(text, 0, text.length, bounds)
+                digitsInkRight = maxOf(digitsInkRight, x + bounds.right)
             }
         }
 
+        val gap = l.dateGapFrac
+        val dateAnchorXFrac = if (gap != null && digitsInkRight.isFinite()) {
+            (digitsInkRight + gap * screenW) / screenW
+        } else {
+            l.dateAnchorXFrac
+        }
         drawDateLine(
-            canvas, now, locale, l.dateLongMonth, l.align, l.dateAnchorXFrac, l.dateTextSizeFrac, l.dateBaselineFrac,
+            canvas, now, locale, l.dateLongMonth, l.align, dateAnchorXFrac, l.dateTextSizeFrac, l.dateBaselineFrac,
             l.dateColor, screenW, screenH, offX, offY,
         )
     }
