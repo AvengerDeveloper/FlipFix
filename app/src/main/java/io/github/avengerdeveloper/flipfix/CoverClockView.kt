@@ -50,9 +50,19 @@ class CoverClockView @JvmOverloads constructor(
         Thread {
             val fresh = CoverClockLayout.load(context)
             val freshShift = CoverFaceMatcher.activeShift(context)
-            if (fresh != layout || freshShift != shift) post { layout = fresh; shift = freshShift; invalidate() }
+            if (fresh != layout || freshShift != shift) post {
+                layout = fresh; shift = freshShift; invalidate()
+                if (windowVisibility != VISIBLE) onChangedWhileHidden?.invoke()
+            }
         }.start()
     }
+
+    /**
+     * Called when the clock changed (another cover preset) while the face was hidden. Android shows the
+     * screenshot it took as the face went away for a moment when the face comes back, which would flash
+     * the old clock.
+     */
+    var onChangedWhileHidden: (() -> Unit)? = null
 
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()

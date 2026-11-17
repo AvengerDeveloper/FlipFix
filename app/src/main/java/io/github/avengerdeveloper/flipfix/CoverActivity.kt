@@ -40,6 +40,14 @@ class CoverActivity : Activity() {
         }
         setContentView(R.layout.activity_cover)
         clock = findViewById(R.id.clock)
+        // A hidden face is brought back with Android's screenshot of it showing first: after a preset
+        // switch that would flash the old clock, so close it and start afresh next time.
+        clock.onChangedWhileHidden = {
+            if (!CoverState.showing) {
+                Log.d(CoverState.TAG, "cover clock changed while hidden: closing the face")
+                finish()
+            }
+        }
         gestures = GestureDetector(this, FlingListener())
         CoverState.coverActivity = WeakReference(this)
         hideNavigationBar()

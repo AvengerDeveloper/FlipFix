@@ -2,10 +2,12 @@ package io.github.avengerdeveloper.flipfix
 
 import android.content.Context
 import android.graphics.Canvas
+import android.graphics.LinearGradient
 import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.RectF
+import android.graphics.Shader
 import android.util.Log
 
 /**
@@ -19,7 +21,22 @@ import android.util.Log
  *
  * Geometry, solved from the template's sample "12:45" (Z Flip8), in digit units:
  */
-class SamsungClockDigits private constructor(private val paths: Array<Path>, val set: Set) {
+class SamsungClockDigits private constructor(
+    private val paths: Array<Path>,
+    val set: Set,
+    /** Per digit, its strokes with their opacity along the stroke (the layered set), or null. */
+    private val shaded: Array<List<Segment>?>,
+) {
+
+    /**
+     * One stroke of a layered digit, from ([x0], [y0]) to ([x1], [y1]) (unit space, y down). Its opacity
+     * runs through [alphas], spread evenly from [from] to [to] along the stroke (flat outside): Samsung's
+     * lock screen draws e.g. a 1's stem fading in from 10% under its flag to solid at its foot.
+     */
+    private class Segment(
+        val path: Path, val x0: Float, val y0: Float, val x1: Float, val y1: Float,
+        val alphas: FloatArray, val from: Float, val to: Float,
+    )
 
     fun path(digit: Int): Path = paths[digit]
 
@@ -55,10 +72,12 @@ class SamsungClockDigits private constructor(private val paths: Array<Path>, val
      * tall. Characters fill the sample's slots from the right (a one-digit hour leaves the first empty).
      * [stroke] gets the line width ([thickness], in digit units: Samsung's clock editor has a thickness
      * setting; [STROKE] is the default); colours and shaders are the caller's.
+     * [shade]: draw a layered digit's strokes with their own opacity, in [shade]'s colour, fading from
+     * [shadeTopAlpha] at the top of the ink to opaque at its bottom (stroke's shader is left as it was).
      */
     fun draw(
         canvas: Canvas, sample: String, text: String, left: Float, bottom: Float, height: Float,
-        stroke: Paint, dot: Paint, thickness: Float = STROKE,
+        stroke: Paint, dot: Paint, thickness: Float = STROKE, shade: Int? = null, shadeTopAlpha: Float = 1f,
     ) {
         val sb = bounds(sample)
         val s = height / (sb.height() + thickness)
@@ -83,12 +102,55 @@ class SamsungClockDigits private constructor(private val paths: Array<Path>, val
             } else {
                 drawMatrix.setScale(s, s)
                 drawMatrix.postTranslate(sx, centerY)
-                drawPath.set(path(c - '0'))
-                drawPath.transform(drawMatrix)
-                canvas.drawPath(drawPath, stroke)
+                val segments = if (shade != null) shaded[c - '0'] else null
+                if (segments == null) {
+                    drawPath.set(path(c - '0'))
+                    drawPath.transform(drawMatrix)
+                    canvas.drawPath(drawPath, stroke)
+                } else {
+                    drawShaded(canvas, segments, sx, centerY, s, bottom, height, stroke, shade!!, shadeTopAlpha)
+                }
             }
         }
     }
+
+    private val ends = FloatArray(4)
+
+    private fun drawShaded(
+        canvas: Canvas, segments: List<Segment>, sx: Float, cy: Float, s: Float, bottom: Float, height: Float,
+        stroke: Paint, color: Int, topAlpha: Float,
+    ) {
+        val saved = stroke.shader
+        for (seg in segments) {
+            ends[0] = sx + seg.x0 * s; ends[1] = cy + seg.y0 * s
+            ends[2] = sx + seg.x1 * s; ends[3] = cy + seg.y1 * s
+            // The ink's own fade (top to bottom), taken at the stroke's middle.
+            val mid = ((ends[1] + ends[3]) / 2 - (bottom - height)) / height
+            val fade = topAlpha + (1f - topAlpha) * mid.coerceIn(0f, 1f)
+            val n = seg.alphas.size
+            val colors = IntArray(n + 2)
+            val stops = FloatArray(n + 2)
+            for (k in 0 until n) {
+                stops[k + 1] = if (n == 1) seg.from else seg.from + (seg.to - seg.from) * k / (n - 1)
+                colors[k + 1] = withAlpha(color, seg.alphas[k] * fade)
+            }
+            stops[0] = 0f; colors[0] = colors[1]
+            stops[n + 1] = 1f; colors[n + 1] = colors[n]
+            for (k in 1..n + 1) stops[k] = stops[k].coerceIn(stops[k - 1], 1f)
+            // (A dot-sized stroke has no direction: one flat colour.)
+            if (kotlin.math.hypot(ends[2] - ends[0], ends[3] - ends[1]) < 1f) {
+                ends[2] = ends[0] + 1f; ends[3] = ends[1]; colors.fill(colors[1])
+            }
+            stroke.shader = LinearGradient(ends[0], ends[1], ends[2], ends[3], colors, stops, Shader.TileMode.CLAMP)
+            drawPath.set(seg.path)
+            drawPath.transform(drawMatrix)
+            canvas.drawPath(drawPath, stroke)
+        }
+        stroke.shader = saved
+    }
+
+    private fun withAlpha(color: Int, alpha: Float) =
+        (color and 0x00FFFFFF) or ((alpha.coerceIn(0f, 1f) * (color ushr 24) + 0.5f).toInt() shl 24)
 
     /**
      * Samsung's path-drawn digit sets: [BIG] (the default stacked clock, one stroke per digit) and
@@ -112,23 +174,43 @@ class SamsungClockDigits private constructor(private val paths: Array<Path>, val
 
         fun load(context: Context, set: Set = Set.BIG): SamsungClockDigits? = cached[set] ?: runCatching {
             val res = context.createPackageContext(AOD_PACKAGE, 0).resources
+            val shaded = arrayOfNulls<List<Segment>>(10)
             val paths = Array(10) { d ->
                 fun arr(kind: String): Array<String> {
                     val id = res.getIdentifier("${set.prefix}_num_${d}_$kind", "array", AOD_PACKAGE)
                     require(id != 0) { "missing ${set.prefix}_num_${d}_$kind" }
                     return res.getStringArray(id)
                 }
-                buildPath(arr("vertices").map(::point), arr("control_points").map(::point), set.pairedVertices)
+                val vertices = arr("vertices").map(::values)
+                val controls = arr("control_points").map(::values)
+                if (set.pairedVertices) shaded[d] = runCatching { shadedSegments(vertices, controls) }.getOrNull()
+                buildPath(vertices.map(::point), controls.map(::point), set.pairedVertices)
             }
-            SamsungClockDigits(paths, set)
+            SamsungClockDigits(paths, set, shaded)
         }.onFailure { Log.w(CoverState.TAG, "Samsung clock digits unavailable: $set", it) }
             .getOrNull()?.also { cached[set] = it }
 
-        /** "x, y" (control points may carry extra values, e.g. the layered set's shading; only x and y are used). */
-        private fun point(s: String): Pair<Float, Float> {
-            val v = s.split(',').map { it.trim().toFloat() }
-            return v[0] to v[1]
-        }
+        /** "x, y" (control points may carry extra values: the layered set's shading, see [shadedSegments]). */
+        private fun values(s: String): List<Float> = s.split(',').map { it.trim().toFloat() }
+
+        private fun point(v: List<Float>): Pair<Float, Float> = v[0] to v[1]
+
+        /**
+         * The layered set's strokes one by one, with their shading. Stroke i's first control point carries
+         * its opacity stops after x and y ("1.00, 1.00" solid, "0.10, 1.00" fading in, "1.00, 0.40, 1.00"
+         * dipping in the middle), its second control point where along the stroke they start and end
+         * ("0.00, 1.00"). Null if a stroke has no shading.
+         */
+        private fun shadedSegments(vertices: List<List<Float>>, controls: List<List<Float>>): List<Segment>? =
+            (0 until vertices.size / 2).map { i ->
+                val c1 = controls[2 * i]
+                val c2 = controls[2 * i + 1]
+                if (c1.size < 4 || c2.size < 4) return null
+                val start = vertices[2 * i]
+                val end = vertices[2 * i + 1]
+                val path = buildPath(listOf(start, end).map(::point), listOf(c1, c2).map(::point), paired = true)
+                Segment(path, start[0], -start[1], end[0], -end[1], c1.drop(2).toFloatArray(), c2[2], c2[3])
+            }
 
         /**
          * Chained vertices (n vertices, n-1 segments) or, if [paired], separate segments (vertex 2i to
