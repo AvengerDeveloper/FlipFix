@@ -9,6 +9,7 @@ import android.media.session.MediaSession
 import android.os.Handler
 import android.os.Looper
 import android.os.PowerManager
+import android.os.SystemClock
 import android.app.Notification
 import android.app.NotificationManager
 import android.service.notification.NotificationListenerService
@@ -72,7 +73,26 @@ class FlipNotificationListener : NotificationListenerService() {
     }
 
     override fun onNotificationPosted(sbn: StatusBarNotification?, rankingMap: RankingMap?) = publishIcons()
-    override fun onNotificationRemoved(sbn: StatusBarNotification?, rankingMap: RankingMap?) = publishIcons()
+    override fun onNotificationRemoved(sbn: StatusBarNotification?, rankingMap: RankingMap?, reason: Int) {
+        if (reason == REASON_CLICK) onNotificationOpened(sbn?.packageName)
+        publishIcons()
+    }
+
+    /**
+     * A notification was tapped (and dismissed itself, as most do): its app opens, on the cover if the phone
+     * is folded. FlipFix mustn't come forward over it after the unlock (see CoverAccessibilityService), and
+     * if it already has (the unlock and the tap land within milliseconds of each other), it steps aside.
+     * Notifications that stay posted when tapped don't report the tap, so they can't be followed.
+     */
+    private fun onNotificationOpened(pkg: String?) {
+        CoverState.notificationOpenedAt = SystemClock.uptimeMillis()
+        if (CoverState.showing) {
+            Log.d(CoverState.TAG, "notification from $pkg opened: stepping aside")
+            CoverState.stepAside()
+        } else {
+            Log.d(CoverState.TAG, "notification from $pkg opened")
+        }
+    }
     override fun onNotificationRankingUpdate(rankingMap: RankingMap?) = publishIcons()
 
     /**

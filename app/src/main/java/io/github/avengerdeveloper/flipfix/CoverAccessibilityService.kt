@@ -299,6 +299,8 @@ class CoverAccessibilityService : AccessibilityService() {
             CoverState.showing -> "already showing"
             !CoverState.isCoverOn(displayManager, powerManager) -> "cover screen not on"
             keyguardManager.isKeyguardLocked -> "still locked"
+            // The unlock was for a notification's app: that app goes in front. Swiping back still works.
+            reason != EDGE_REASON && CoverState.notificationJustOpened() -> "a notification's app is opening"
             else -> null
         }
         if (skip != null) {

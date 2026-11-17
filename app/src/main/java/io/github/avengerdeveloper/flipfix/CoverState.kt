@@ -100,6 +100,23 @@ object CoverState {
     /** The live cover face, if any (it stays alive in the background between uses). */
     @Volatile var coverActivity: WeakReference<Activity>? = null
 
+    /**
+     * When the user last opened a notification (SystemClock.uptimeMillis), e.g. tapping WhatsApp's on the
+     * locked cover: Samsung opens that app as the unlock completes, and it must stay in front of FlipFix.
+     */
+    @Volatile var notificationOpenedAt = 0L
+
+    /** True for a few seconds after a notification was opened (FlipFix then doesn't come forward). */
+    fun notificationJustOpened(now: Long = android.os.SystemClock.uptimeMillis()) =
+        notificationOpenedAt != 0L && now - notificationOpenedAt < NOTIFICATION_OPEN_GRACE_MS
+
+    private const val NOTIFICATION_OPEN_GRACE_MS = 3_000L
+
+    /** Move the cover face behind whatever app is under it (no animation). Main thread. */
+    fun stepAside() {
+        coverActivity?.get()?.moveTaskToBack(true)
+    }
+
     /** Close the cover face completely, e.g. when FlipFix is switched off. */
     fun finishCover() {
         coverActivity?.get()?.finish()
