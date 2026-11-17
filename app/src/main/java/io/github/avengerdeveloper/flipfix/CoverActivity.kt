@@ -46,11 +46,14 @@ class CoverActivity : Activity() {
         // switch that would flash the old clock (for about 0.3 s), so it is retaken or skipped. (Closing
         // the face instead shows Samsung's widget page for half a second while a new face is built.)
         clock.onChangedWhileHidden = {
-            if (!CoverState.showing && !CoverState.faceOutdated) {
+            if (!CoverState.showing) {
+                val alreadyOutdated = CoverState.faceOutdated
                 CoverState.faceOutdated = true
                 if (getSystemService(KeyguardManager::class.java)?.isKeyguardLocked == true && CoverState.isEnabled(this)) {
+                    // On every change while locked: the face may already be marked out of date by an
+                    // earlier change it hasn't redrawn for yet.
                     waitBehindLockScreen()
-                } else {
+                } else if (!alreadyOutdated) {
                     Log.d(CoverState.TAG, "cover clock changed while hidden: next launch skips the old screenshot")
                 }
             }
@@ -147,10 +150,23 @@ class CoverActivity : Activity() {
         clock.invalidate()
         clock.reloadStyleAsync()
         window.decorView.post { resumeVideo("resumed") }
-        // Samsung sends its own pause at unlock; if we were already on top, ours may land first.
-        // Re-send shortly after so the last word is always "resume".
-        window.decorView.postDelayed({ if (CoverState.showing) resumeVideo("resumed +250ms") }, 250)
-        window.decorView.postDelayed({ if (CoverState.showing) resumeVideo("resumed +700ms") }, 700)
+        // Samsung pauses the video itself about 80 ms into the unlock, and the video takes no commands
+        // from the face while Android's screenshot of it still covers it (up to ~0.3 s; seen in its log).
+        // Re-sent every 100 ms for a while, so it plays again within 0.1 s of both: with resends at
+        // 250 and 700 ms only, a filmed unlock froze for 0.75 s.
+        resendsLeft = RESUME_RESENDS
+        window.decorView.removeCallbacks(resendResume)
+        window.decorView.postDelayed(resendResume, RESUME_RESEND_MS)
+    }
+
+    private var resendsLeft = 0
+    private val resendResume = object : Runnable {
+        override fun run() {
+            if (!CoverState.showing || resendsLeft <= 0) return
+            resendsLeft--
+            resumeVideo(if (resendsLeft == 0) "resumed, last resend" else null)
+            window.decorView.postDelayed(this, RESUME_RESEND_MS)
+        }
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
@@ -248,13 +264,14 @@ class CoverActivity : Activity() {
     /** Drag this far (same as the edge peek: 60% of the width) for the card to reach its smallest. */
     private fun exitDistance() = window.decorView.width.coerceAtLeast(1) * 0.6f
 
-    private fun resumeVideo(reason: String) {
+    /** Asks Samsung's video wallpaper to play; logged with [reason] (null: not logged, for the resends). */
+    private fun resumeVideo(reason: String?) {
         val token = window.decorView.windowToken ?: return
         try {
             WallpaperManager.getInstance(this).sendWallpaperCommand(token, CMD_RESUME, 0, 0, 0, null)
-            Log.d(CoverState.TAG, "sent resume ($reason)")
+            if (reason != null) Log.d(CoverState.TAG, "sent resume ($reason)")
         } catch (t: Throwable) {
-            Log.w(CoverState.TAG, "resume failed ($reason)", t)
+            Log.w(CoverState.TAG, "resume failed (${reason ?: "resend"})", t)
         }
     }
 
@@ -307,5 +324,7 @@ class CoverActivity : Activity() {
         const val MIN_SWIPE_DP = 48
         const val EXIT_COMMIT_PROGRESS = 0.33f
         const val EXIT_FLICK_DP_PER_MS = 0.4f
+        const val RESUME_RESEND_MS = 100L
+        const val RESUME_RESENDS = 12
     }
 }

@@ -59,6 +59,9 @@ object CoverFaceMatcher {
     /** Drawn colours closer than this (per channel) are one colour of the clock (anti-aliasing, scaling). */
     private const val KEY_TOLERANCE = 24
 
+    /** A snapshot with fewer lit pixels than this (per thousand) is blank: the clock alone lights more. */
+    private const val MIN_LIT_PER_MILLE = 5
+
     /** Samsung's tint of a clock colour keeps its lightness to within this (luma, 0..255). */
     private const val MAX_TINT_LUMA = 90
 
@@ -180,6 +183,12 @@ object CoverFaceMatcher {
             if (luma > 16) lit++
         }
         val shotInfo = "snapshot ${coverW}x$coverH, mean brightness ${lumaSum / screen.size}, lit ${lit * 100 / screen.size}%"
+        // A black snapshot (the cover went dark as it was taken) shows no clock: matching it would forget
+        // the preset already found, and its colours.
+        if (lit * 1000L < screen.size * MIN_LIT_PER_MILLE) {
+            Log.d(CoverState.TAG, "cover preset check: blank snapshot ($shotInfo), skipped")
+            return true
+        }
 
         // Presets with the same clock (same style, place, size and colour) draw the same: compare once.
         val byLayout = CoverClockLayout.templates()

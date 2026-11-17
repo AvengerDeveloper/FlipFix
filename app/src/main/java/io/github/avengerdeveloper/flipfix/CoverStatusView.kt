@@ -150,7 +150,8 @@ class CoverStatusView @JvmOverloads constructor(
         canvas.drawRect(pill.left, pill.top, pill.left + pill.width() * level / 100f, pill.bottom, fillPaint)
         canvas.restore()
 
-        canvas.drawText(text, textLeft, BATTERY_BASELINE * sy, textPaint)
+        // As a shape: at night One UI lightens dark text (see drawTextShape).
+        canvas.drawTextShape(text, textLeft, BATTERY_BASELINE * sy, textPaint)
 
         val gx = glyphLeft
         val gy = GLYPH_TOP * sy

@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Canvas
 import android.graphics.LinearGradient
 import android.graphics.Paint
+import android.graphics.Path
 import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.Shader
@@ -123,7 +124,7 @@ class CoverClockRenderer(private val context: Context) {
             CoverClockLayout.Align.CENTER -> anchor - (bounds.left + bounds.right) / 2f
             CoverClockLayout.Align.RIGHT -> anchor - bounds.right
         }
-        canvas.drawText(dateText, x - offX, baselineFrac * screenH - offY, lineDatePaint)
+        canvas.drawTextShape(dateText, x - offX, baselineFrac * screenH - offY, lineDatePaint)
     }
 
     private val twoLinePaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.SUBPIXEL_TEXT_FLAG)
@@ -177,8 +178,8 @@ class CoverClockRenderer(private val context: Context) {
         // Upright (x, y) -> cover (y, screenH - x).
         canvas.translate(-offX, screenH - offY)
         canvas.rotate(-90f)
-        canvas.drawText(timeText, timeX, l.timeBaselineFrac * screenW, twoLinePaint)
-        canvas.drawText(dateText, dateX, l.dateBaselineFrac * screenW, sideDatePaint)
+        canvas.drawTextShape(timeText, timeX, l.timeBaselineFrac * screenW, twoLinePaint)
+        canvas.drawTextShape(dateText, dateX, l.dateBaselineFrac * screenW, sideDatePaint)
         canvas.restore()
     }
 
@@ -231,7 +232,7 @@ class CoverClockRenderer(private val context: Context) {
             for ((i, line) in lines.withIndex()) {
                 val (text, baseline) = line
                 val x = blockLeft + (blockW - advances[i]) * lineShare
-                canvas.drawText(text, x - offX, baseline * screenH - offY, twoLinePaint)
+                canvas.drawTextShape(text, x - offX, baseline * screenH - offY, twoLinePaint)
                 twoLinePaint.getTextBounds(text, 0, text.length, bounds)
                 digitsInkRight = maxOf(digitsInkRight, x + bounds.right)
             }
@@ -275,7 +276,7 @@ class CoverClockRenderer(private val context: Context) {
         lineDatePaint.getTextBounds(dateText, 0, dateText.length, bounds)
         val lineWidth = bounds.width() + dateH * CoverClockLayout.WEATHER_SLOT_PER_DATE_HEIGHT
         val dateX = l.lineCenterXFrac * screenW - lineWidth / 2f - bounds.left
-        canvas.drawText(dateText, dateX - offX, l.dateBaselineFrac * screenH - offY, lineDatePaint)
+        canvas.drawTextShape(dateText, dateX - offX, l.dateBaselineFrac * screenH - offY, lineDatePaint)
     }
 
     /**
@@ -336,8 +337,8 @@ class CoverClockRenderer(private val context: Context) {
         timePaint.getTextBounds(timeText, 0, timeText.length, bounds)
         val timeX = dateInkLeft - digitH * CoverClockStyle.GAP_PER_DIGIT_HEIGHT - bounds.right
 
-        canvas.drawText(timeText, timeX - offX, timeBaseline - offY, timePaint)
-        canvas.drawText(dateText, dateX - offX, dateBaseline - offY, datePaint)
+        canvas.drawTextShape(timeText, timeX - offX, timeBaseline - offY, timePaint)
+        canvas.drawTextShape(dateText, dateX - offX, dateBaseline - offY, datePaint)
     }
 
     /** Samsung's cover clock shows hours and minutes only (no AM/PM), following the 12/24-hour setting. */
@@ -346,4 +347,15 @@ class CoverClockRenderer(private val context: Context) {
         return DateFormat.getBestDateTimePattern(locale, skeleton)
             .replace("a", "").replace(" ", " ").trim()
     }
+}
+
+/**
+ * Draws [text] at ([x], [y]) as filled glyph outlines rather than as text. At night One UI's night dim
+ * lightens the colour of dark text in apps (cover 5's near-black clock came out mid-grey, #525353 for
+ * #1E1F1F); shapes keep their exact colour, as Samsung's own cover clock does.
+ */
+internal fun Canvas.drawTextShape(text: String, x: Float, y: Float, paint: Paint) {
+    val outline = Path()
+    paint.getTextPath(text, 0, text.length, x, y, outline)
+    drawPath(outline, paint)
 }
