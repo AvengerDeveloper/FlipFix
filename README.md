@@ -20,13 +20,13 @@ Samsung's One UI 9 update changed the cover screen on the Galaxy Z Flip. Now, th
 * **Your video keeps playing** after you unlock — using the exact video you already set in Samsung's Wallpaper settings.
 * **Your notifications and music controls** stay in their exact spots, and so does **your clock** for the clock styles FlipFix can draw so far (other styles show no clock rather than a wrong one).
 * **Swipe left or right** to see your Samsung widgets; **swipe back** to return to your video.
-* **Made for cover screens without widgets.** If your cover style has widgets under the clock, FlipFix shows each one in its spot and shape, blurred and not tappable: showing them live would need permissions (health, alarms, usage) that FlipFix doesn't ask for. The real ones are a swipe away.
+* **Made for cover screens without widgets.** If your cover style has widgets under the clock, FlipFix shows each one in its spot and shape as a frosted glass pane with your video moving behind it, the widget blurred and not tappable: showing them live would need permissions (health, alarms, usage) that FlipFix doesn't ask for. The real ones are a swipe away.
 * **Swipe down from the top** for your normal notifications and quick settings.
 * **Open your phone** and FlipFix turns itself off automatically.
 
 ### Is it safe?
 * **100% offline:** FlipFix has no internet access, so nothing ever leaves your phone.
-* **Private:** Nothing is saved or sent. FlipFix looks at your notifications only to show their icons and your music player, and the quick snapshots it takes of the cover screen (for the swipe animations and to recognise your cover style) stay in memory and are thrown away. The one thing kept is a heavily blurred copy of any widgets under your clock, too blurry to read, in memory only, to draw their placeholders.
+* **Private:** Nothing is saved or sent. FlipFix looks at your notifications only to show their icons and your music player, and the quick snapshots it takes of the cover screen (for the swipe animations and to recognise your cover style) stay in memory and are thrown away. The one thing kept is a heavily blurred copy of the text and icons of any widgets under your clock, too blurry to read, in memory only, to draw their placeholders.
 * **Banking-friendly:** Because FlipFix turns itself off the moment you unfold your phone, banking apps work normally without complaining.
 
 ### How to install (takes ~3 minutes)
@@ -76,7 +76,7 @@ Once unlocked while folded, FlipFix keeps your cover screen intact:
 | **Clock & date** | Stays in place using the same font, size, color, and position as Samsung's lock screen |
 | **Notifications & battery** | Samsung-style notification icons top-left; battery pill top-right with charging bolt or protection shield |
 | **Music pill** | Samsung's Now bar player with album artwork, scrolling title, and working previous / play-pause / next controls |
-| **Widgets under the clock** | Blurred, non-working placeholders in the same spots and shapes. FlipFix is optimized for widgetless cover screens: live widgets would need extra permissions. Swipe left or right for the real ones |
+| **Widgets under the clock** | Frosted glass, non-working placeholders in the same spots and shapes, your video moving behind them. FlipFix is optimized for widgetless cover screens: live widgets would need extra permissions. Swipe left or right for the real ones |
 | **Swipe left (or right)** | Opens Samsung's widgets as before — your cover face shrinks away as a card following your finger |
 | **Swipe right from left edge** | Returns from widgets back to your video, with the card sliding back in |
 | **Swipe up** | Opens Samsung Wallet |
@@ -125,7 +125,7 @@ FlipFix is built to stay out of the way and keep everything strictly on-device.
 
 | Permission / Capability | Why It's Needed & Privacy Guardrails |
 | :--- | :--- |
-| **Accessibility Service**<br>(`BIND_ACCESSIBILITY_SERVICE`) | Android only allows an app to open a window on the cover screen from the background through a few privileged mechanisms. FlipFix listens *only* for top-window state changes and **never** reads screen text or UI structure (`canRetrieveWindowContent` is turned off in its XML configuration). Snapshots used for the swipe-to-widgets card animation, plus a few snapshots of Samsung's locked cover after you switch cover presets (to tell which preset is active; it can show notification previews, so it is compared and dropped within a fraction of a second), stay strictly in RAM, are never written to storage, and are released when the screen turns off. The one exception: if your cover style has widgets under the clock, a heavily blurred copy of each widget tile (too blurry to read) is kept in RAM to draw its placeholder. It is never written to storage either, and after a restart it is rebuilt from one new snapshot of the locked cover. |
+| **Accessibility Service**<br>(`BIND_ACCESSIBILITY_SERVICE`) | Android only allows an app to open a window on the cover screen from the background through a few privileged mechanisms. FlipFix listens *only* for top-window state changes and **never** reads screen text or UI structure (`canRetrieveWindowContent` is turned off in its XML configuration). Snapshots used for the swipe-to-widgets card animation, plus a few snapshots of Samsung's locked cover after you switch cover presets (to tell which preset is active; it can show notification previews, so it is compared and dropped within a fraction of a second), stay strictly in RAM, are never written to storage, and are released when the screen turns off. The one exception: if your cover style has widgets under the clock, a heavily blurred copy of each widget's text and icons (too blurry to read) is kept in RAM to draw its placeholder. It is never written to storage either, and after a restart it is rebuilt from one new snapshot of the locked cover. |
 | **Write Secure Settings**<br>(`WRITE_SECURE_SETTINGS`) | Lets FlipFix turn its own Accessibility Service on only while the cover screen is active, and turn it off the instant you unfold the phone or open an excluded app. |
 | **Notification Access**<br>(`BIND_NOTIFICATION_LISTENER_SERVICE`) | Reads active notifications locally on-device solely to render the top-left notification icons and the Now bar music player pill (album artwork, track title, and playback controls). |
 

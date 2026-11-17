@@ -28,6 +28,14 @@ class CoverClockView @JvmOverloads constructor(
     /** Blurred stand-ins for the widgets Samsung's lock screen shows under this clock (see CoverWidgets). */
     private var widgets = CoverWidgets.active(context)
 
+    /** Where the resting face shows [widgets], on glass; null: this view draws them (the edge-peek card). */
+    var glass: CoverWidgetGlass? = null
+        set(value) {
+            field = value
+            value?.show(widgets)
+            invalidate()
+        }
+
     /**
      * True (default): pinned to the cover display, wherever the view sits. False: lays out in its own
      * bounds, for the edge-peek card that represents the whole cover while it slides and scales.
@@ -56,6 +64,7 @@ class CoverClockView @JvmOverloads constructor(
             val freshWidgets = CoverWidgets.active(context)
             if (fresh != layout || freshPlacement != placement || freshWidgets !== widgets) post {
                 layout = fresh; placement = freshPlacement; widgets = freshWidgets; invalidate()
+                glass?.show(freshWidgets)
                 if (windowVisibility != VISIBLE) onChangedWhileHidden?.invoke()
             }
         }.start()
@@ -109,7 +118,7 @@ class CoverClockView @JvmOverloads constructor(
             val h = (windowBounds?.height() ?: height).toFloat()
             drawPlaced(canvas, w, h, location[0] - placement.dx * w, location[1] - placement.dy * h)
             // Measured where Samsung's lock screen shows them: no template offset or resize.
-            CoverWidgets.draw(canvas, widgets, w, h, location[0].toFloat(), location[1].toFloat())
+            if (glass == null) CoverWidgets.draw(canvas, widgets, w, h, location[0].toFloat(), location[1].toFloat())
         } else {
             // Drawn inside a moving/scaled card that represents the whole cover: lay out in the view's own
             // coordinates so the clock moves and scales with the card.

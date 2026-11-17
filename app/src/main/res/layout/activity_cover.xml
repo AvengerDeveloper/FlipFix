@@ -4,6 +4,12 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent">
 
+    <!-- Glass stand-ins for the widgets under Samsung's clock; see CoverWidgetGlass. -->
+    <io.github.avengerdeveloper.flipfix.CoverWidgetGlass
+        android:id="@+id/glass"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
+
     <!-- Matches Samsung's cover lock-screen clock line; see CoverClockStyle. -->
     <io.github.avengerdeveloper.flipfix.CoverClockView
         android:id="@+id/clock"

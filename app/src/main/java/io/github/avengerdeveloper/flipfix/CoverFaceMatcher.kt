@@ -275,7 +275,7 @@ object CoverFaceMatcher {
         val brightness = (lumaSum / screen.size).toInt()
         // Where the clock is on Samsung's lock screen: the matched drawing's ink, as placed by the fit.
         val clockOnScreen = matchedFit?.probe?.box?.let { android.graphics.RectF(it).apply { offset(matchedFit.fit.dx.toFloat(), matchedFit.fit.dy.toFloat()) } }
-        val widgetInfo = CoverWidgets.look(stamp, matched, brightness, screen, w, h, clockOnScreen, matchedFit?.parsed?.alignment())
+        val widgetInfo = CoverWidgets.look(stamp, matched, screen, w, h, clockOnScreen, matchedFit?.parsed?.alignment())
         val samePreset = sameSwitch && p.getString(KEY_FOLDER, null) == matched
         if (shownColors == null) {
             edit.remove(KEY_COLORS)

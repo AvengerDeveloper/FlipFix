@@ -26,20 +26,29 @@ import kotlin.math.sin
  * for widgetless cover screens. So the face shows each widget where Samsung does, in its shape, blurred
  * past reading, and doing nothing; the cover looks as it did, and the real widgets are a swipe away.
  *
- * The tiles are found on the snapshot the preset check takes ([CoverFaceMatcher]), copied blurred, and kept
- * in memory only, never stored: after a restart they come back with the next check.
+ * The tiles are found on the snapshot the preset check takes ([CoverFaceMatcher]); only each widget's marks
+ * are kept, blurred, in memory only, never stored: after a restart they come back with the next check. The
+ * face shows them on glass ([CoverWidgetGlass]): the moving cover video behind, blurred as Samsung does.
  */
 object CoverWidgets {
 
-    /** A widget tile: where it is on the cover (fractions) and its blurred look. */
-    class Tile(val left: Float, val top: Float, val right: Float, val bottom: Float, val slots: Int, val image: Bitmap)
+    /**
+     * A widget tile: where it is on the cover (fractions) and its marks, blurred, see-through around them;
+     * [strength]: how much its marks stood out (mean opacity before the blur; lower mid-fade).
+     */
+    class Tile(
+        val left: Float, val top: Float, val right: Float, val bottom: Float, val slots: Int, val image: Bitmap,
+        val strength: Float,
+    )
 
     /**
      * What the check of preset switch [stamp] saw: the matched preset's [folder] ("" if none) and its
-     * [tiles], from a snapshot this bright; [looks]: snapshots looked at for them.
+     * [tiles]; [looks]: snapshots looked at for them.
      */
-    class Row(val stamp: String, val folder: String, val brightness: Int, val tiles: List<Tile>, val looks: Int = 1) {
-        fun looked() = Row(stamp, folder, brightness, tiles, looks + 1)
+    class Row(val stamp: String, val folder: String, val tiles: List<Tile>, val looks: Int = 1) {
+        val slots get() = tiles.sumOf { it.slots }
+        val strength get() = tiles.sumOf { it.strength.toDouble() }
+        fun looked() = Row(stamp, folder, tiles, looks + 1)
     }
 
     @Volatile
@@ -48,9 +57,12 @@ object CoverWidgets {
 
     // Samsung's row on the 948-pixel-wide cover, in cover pixels (scaled to other widths).
     private const val REFERENCE_WIDTH = 948f
-    private const val SLOT = 140f
-    private const val SLOT_GAP = 31f
-    private const val CORNER = 32f
+    private const val SLOT = 141f
+    private const val SLOT_GAP = 30f
+    private const val CORNER = 46f
+
+    /** The row's edges are looked for this far (cover pixels) around where the search put them. */
+    private const val EDGE_REACH = 6f
 
     /** The row's top this far below the clock's ink (Samsung: 45). */
     private const val ROW_GAP_MIN = 36f
@@ -59,8 +71,15 @@ object CoverWidgets {
     /** The row starts this close to the clock's edge (left/right) or middle. */
     private const val ANCHOR_REACH = 8f
 
-    /** Blur: three box passes of this radius (cover pixels), close to a 13-pixel Gaussian. */
+    /** Blur of a widget's marks: three box passes of this radius (cover pixels), close to a 13-pixel Gaussian. */
     private const val BLUR = 12f
+
+    /** A widget's panel is fitted on this band in from its edge (cover pixels), where Samsung draws no marks. */
+    private const val PANEL_BAND_FROM = 3f
+    private const val PANEL_BAND_TO = 12f
+
+    /** Luma this far from the panel counts as a mark (less is the panel's own unevenness). */
+    private const val MARK_MIN_STEP = 6f
 
     /** Luma step across an outline point that counts as an edge there. */
     private const val EDGE_STEP = 3f
@@ -72,21 +91,30 @@ object CoverWidgets {
     /** ...around a smooth padding band (Samsung blurs the wallpaper behind a widget; median gradient). */
     private const val MAX_PADDING = 1.5f
 
-    /** A wide tile whose slot gaps show edges like this is two tiles. */
+    /**
+     * A wide tile whose slot gaps show edges like this (share of each gap side; real gaps 0.84+, slot
+     * boundaries inside a widget 0.47 at most) is two tiles. The gap is looked for this far (cover pixels)
+     * either side of where the hypothesis puts it.
+     */
     private const val SPLIT = 0.8f
+    private const val SPLIT_REACH = 4f
 
     private const val MAX_SLOTS = 4
 
     /**
      * Snapshots a preset check may look at for widgets: Samsung fades them in after the clock, so the first
-     * snapshot (taken early, to know the clock before a quick unlock) can miss them.
+     * snapshot (taken early, to know the clock before a quick unlock) can miss them, and a widget's edge can
+     * melt into the video behind it for a moment.
      */
     private const val MAX_LOOKS = 3
 
-    /** Whether another snapshot is worth taking for [stamp]: its preset matched, but no widgets showed yet. */
+    /**
+     * Whether another snapshot is worth taking for [stamp]: its preset matched, but its row isn't full (no
+     * widgets showed yet, or some may have been missed). Only after a preset switch: a few per switch.
+     */
     fun wantsAnotherLook(stamp: String): Boolean {
         val r = row ?: return false
-        return r.stamp == stamp && r.folder.isNotEmpty() && r.tiles.isEmpty() && r.looks < MAX_LOOKS
+        return r.stamp == stamp && r.folder.isNotEmpty() && r.slots < MAX_SLOTS && r.looks < MAX_LOOKS
     }
 
     /** The tiles of the active preset (none if it has no widgets or isn't known). */
@@ -100,53 +128,76 @@ object CoverWidgets {
      * Looks for widget tiles on [screen] ([w] x [h], Samsung's locked cover at the comparison scale, taken
      * while [stamp] was current) under the clock whose ink spans [clock] there, aligned by [align] (null:
      * judged from where the ink sits). Keeps them, blurred, for [folder] (the matched preset; null: none
-     * matched). Tiles once found stay (a later snapshot may catch them mid-fade) unless a snapshot at
-     * least as bright finds others. Returns a note for the log.
+     * matched). Of the snapshots looked at for [stamp], the one that saw the most of the row wins, and on a
+     * tie the one whose marks stood out most: a later one may catch tiles mid-fade, or with an edge melted
+     * into the video, and one taken as the cover unlocks may catch them fading out. Returns a note for the log.
      */
     fun look(
-        stamp: String, folder: String?, brightness: Int, screen: IntArray, w: Int, h: Int,
+        stamp: String, folder: String?, screen: IntArray, w: Int, h: Int,
         clock: RectF?, align: CoverClockLayout.Align?,
     ): String {
         if (folder == null || clock == null) {
-            row = Row(stamp, "", brightness, emptyList())
+            row = Row(stamp, "", emptyList())
             return ""
         }
         val prev = row?.takeIf { it.stamp == stamp && it.folder == folder }
-        if (prev != null && prev.tiles.isNotEmpty() && brightness < prev.brightness) {
-            row = prev.looked()
-            return ""
-        }
         val (found, closest) = find(screen, w, h, clock, align ?: alignOf(clock, w))
-        if (found.isEmpty() && prev != null && prev.tiles.isNotEmpty()) {
+        val tiles = found.map { (rect, slots) ->
+            val (image, strength) = replica(screen, w, h, rect)
+            // find() measures in pixel indices (a pixel's value sits at its centre); the cover is drawn in
+            // pixel edges, half a snapshot pixel further on (1 cover pixel at the comparison scale).
+            Tile(
+                (rect.left + 0.5f) / w, (rect.top + 0.5f) / h, (rect.right + 0.5f) / w, (rect.bottom + 0.5f) / h,
+                slots, image, strength,
+            )
+        }
+        val fresh = Row(stamp, folder, tiles, (prev?.looks ?: 0) + 1)
+        if (prev != null && prev.slots > 0 &&
+            (fresh.slots < prev.slots || (fresh.slots == prev.slots && fresh.strength <= prev.strength))
+        ) {
             row = prev.looked()
             return ""
         }
-        val tiles = found.map { (rect, slots) ->
-            Tile(rect.left / w, rect.top / h, rect.right / w, rect.bottom / h, slots, replica(screen, w, h, rect))
-        }
-        row = Row(stamp, folder, brightness, tiles, (prev?.looks ?: 0) + 1)
+        row = fresh
         if (tiles.isNotEmpty()) return ", widgets " + tiles.joinToString("+") { "${it.slots}x1" }
         return ", no widgets" + (closest?.let { (slots, l) ->
             " (closest ${slots}x1: outline %d%%, edge %.1f, padding %.1f)".format((l.coverage * 100).roundToInt(), l.step, l.padding)
         } ?: "")
     }
 
-    /** Draws [tiles] on a [w] x [h] cover drawn at ([offX], [offY]). */
+    /**
+     * Draws [tiles] on a [w] x [h] cover drawn at ([offX], [offY]) as tinted see-through panes (no live blur:
+     * for the edge-peek card, and where [CoverWidgetGlass] can't use Samsung's blur).
+     */
     fun draw(canvas: Canvas, tiles: List<Tile>, w: Float, h: Float, offX: Float, offY: Float) {
         for (t in tiles) {
-            val rect = RectF(t.left * w - offX, t.top * h - offY, t.right * w - offX, t.bottom * h - offY)
-            val matrix = Matrix().apply {
-                setScale(rect.width() / t.image.width, rect.height() / t.image.height)
-                postTranslate(rect.left, rect.top)
-            }
-            paint.shader = BitmapShader(t.image, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP).apply { setLocalMatrix(matrix) }
-            val corner = rect.height() * CORNER / SLOT
-            canvas.drawRoundRect(rect, corner, corner, paint)
+            drawTile(canvas, t, RectF(t.left * w - offX, t.top * h - offY, t.right * w - offX, t.bottom * h - offY), tint = true)
         }
+    }
+
+    /** Draws [tile] at [rect]: its marks, over a tint of the cover behind it if [tint]. */
+    fun drawTile(canvas: Canvas, tile: Tile, rect: RectF, tint: Boolean) {
+        val corner = corner(rect.height())
+        if (tint) canvas.drawRoundRect(rect, corner, corner, tintPaint)
+        val matrix = Matrix().apply {
+            setScale(rect.width() / tile.image.width, rect.height() / tile.image.height)
+            postTranslate(rect.left, rect.top)
+        }
+        paint.shader = BitmapShader(tile.image, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP).apply { setLocalMatrix(matrix) }
+        canvas.drawRoundRect(rect, corner, corner, paint)
         paint.shader = null
     }
 
+    /** A tile's corner radius at [height] (Samsung's 46 px on a 141 px slot). */
+    fun corner(height: Float) = height * CORNER / SLOT
+
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+
+    /**
+     * See-through stand-in for Samsung's frosted panel: about what its dark background blur does to the
+     * cover's middle tones (it squeezes them into 34-175), minus the blur.
+     */
+    private val tintPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(128, 62, 70, 86) }
 
     private fun alignOf(clock: RectF, w: Int): CoverClockLayout.Align = when {
         abs(clock.centerX() - w / 2f) < w * 0.05f -> CoverClockLayout.Align.CENTER
@@ -257,6 +308,7 @@ object CoverWidgets {
         val slot = SLOT * unit; val gap = SLOT_GAP * unit; val r = CORNER * unit
         fun width(n: Int) = n * slot + (n - 1) * gap
         val cache = HashMap<Triple<Int, Int, Int>, Look?>()
+        val splitReach = max(1, (SPLIT_REACH * unit).roundToInt())
         // The hypothesis nearest to a tile, for the log when none is one.
         var closest: Pair<Int, Look>? = null
         fun tileOk(x: Float, y: Float, n: Int): Look? {
@@ -266,9 +318,13 @@ object CoverWidgets {
                 if (closest.let { it == null || l.coverage > it.second.coverage }) closest = n to l
                 if (l.coverage < MIN_COVERAGE || l.step < MIN_STEP || l.padding > MAX_PADDING) return@getOrPut null
                 for (k in 1 until n) {
-                    val g0 = x + k * (slot + gap) - gap; val g1 = x + k * (slot + gap)
-                    val split = min(lineCoverage(im, g0, y + r, y + slot - r), lineCoverage(im, g1, y + r, y + slot - r))
-                    if (split >= SPLIT) return@getOrPut null
+                    // Looked for a little around where the gap would be: this hypothesis may sit a pixel or
+                    // two off the real tiles and still pass (a 2x1 and a 1x1 read as one 3x1 otherwise).
+                    for (s in -splitReach..splitReach) {
+                        val g0 = x + k * (slot + gap) - gap + s; val g1 = g0 + gap
+                        val split = min(lineCoverage(im, g0, y + r, y + slot - r), lineCoverage(im, g1, y + r, y + slot - r))
+                        if (split >= SPLIT) return@getOrPut null
+                    }
                 }
                 l
             }
@@ -306,39 +362,155 @@ object CoverWidgets {
             }
         }
         val row = best ?: return emptyList<Pair<RectF, Int>>() to closest
-        // Settle the row on its sharpest outline (the search above is in whole pixels and favours coverage).
-        var bestShift = 0f to 0f; var bestStep = -1f
-        for (i in -6..6) for (j in -6..6) {
-            val sx = i / 2f; val sy = j / 2f
-            var s = 0f
-            for ((x, n) in row) s += look(im, x + sx, bestY + sy, width(n), slot, r)?.step ?: -1000f
-            if (s > bestStep) { bestStep = s; bestShift = sx to sy }
-        }
+        // Settle the row on its edges, to a fraction of a pixel (the search above is in whole pixels and
+        // favours coverage): where the luma step across the first tile's left side and across the tiles'
+        // tops peaks. On every capture this lands within half a pixel of Samsung's edges.
+        val edgeReach = EDGE_REACH * unit
+        val x0 = row.first().first
+        val left = edgePeak(im, vertical = true, line = x0, spans = listOf(bestY + r to bestY + slot - r), reach = edgeReach)
+        val top = edgePeak(im, vertical = false, line = bestY, spans = row.map { (x, n) -> x + r to x + width(n) - r }, reach = edgeReach)
         return row.map { (x, n) ->
-            val left = x + bestShift.first; val top = bestY + bestShift.second
-            RectF(left, top, left + width(n), top + slot) to n
+            val tileLeft = x + left - x0
+            RectF(tileLeft, top, tileLeft + width(n), top + slot) to n
         } to closest
     }
 
-    /** The tile at [rect] on [screen], blurred past reading (its outline left out). */
-    private fun replica(screen: IntArray, w: Int, h: Int, rect: RectF): Bitmap {
+    /**
+     * Where the luma step across a straight tile side peaks, to a fraction of a pixel: the side lies at
+     * [line] (x for a [vertical] side, else y), along [spans]; looked for within [reach] of [line], which is
+     * kept if the step peaks at neither.
+     */
+    private fun edgePeak(im: Images, vertical: Boolean, line: Float, spans: List<Pair<Float, Float>>, reach: Float): Float {
+        val step = 0.5f
+        val n = (2 * reach / step).roundToInt() + 1
+        val profile = FloatArray(n)
+        for (i in 0 until n) {
+            val o = line - reach + i * step
+            var sum = 0f; var count = 0
+            for ((from, to) in spans) {
+                var t = from
+                while (t < to) {
+                    val p = if (vertical) at(im.luma, im.w, im.h, o - 1, t) else at(im.luma, im.w, im.h, t, o - 1)
+                    val q = if (vertical) at(im.luma, im.w, im.h, o + 1, t) else at(im.luma, im.w, im.h, t, o + 1)
+                    if (!p.isNaN() && !q.isNaN()) { sum += abs(p - q); count++ }
+                    t += 1f
+                }
+            }
+            profile[i] = if (count == 0) 0f else sum / count
+        }
+        val i = profile.indices.maxBy { profile[it] }
+        if (i == 0 || i == n - 1) return line
+        val a = profile[i - 1]; val b = profile[i]; val c = profile[i + 1]
+        val d = a - 2 * b + c
+        val sub = if (d != 0f) 0.5f * (a - c) / d else 0f
+        return line - reach + (i + sub) * step
+    }
+
+    /**
+     * The widget at [rect] on [screen] without its panel: only its own marks (text, icons, rings), lifted off
+     * the panel and blurred past reading, see-through elsewhere, so the live cover shows around them. The
+     * panel (Samsung's blur of the wallpaper behind it, which holds no marks near its edges) is taken as a
+     * smooth fit of that edge band; a mark is how far a pixel stands out from it, as opacity. Also returns
+     * how much the marks stood out (their mean opacity before the blur).
+     */
+    private fun replica(screen: IntArray, w: Int, h: Int, rect: RectF): Pair<Bitmap, Float> {
         val x0 = (ceil(rect.left).toInt() + 1).coerceIn(0, w - 1)
         val y0 = (ceil(rect.top).toInt() + 1).coerceIn(0, h - 1)
         val x1 = (floor(rect.right).toInt() - 1).coerceIn(x0 + 1, w)
         val y1 = (floor(rect.bottom).toInt() - 1).coerceIn(y0 + 1, h)
-        val cw = x1 - x0; val ch = y1 - y0
-        val r = FloatArray(cw * ch); val g = FloatArray(cw * ch); val b = FloatArray(cw * ch)
+        val cw = x1 - x0; val ch = y1 - y0; val n = cw * ch
+        val rgb = Array(3) { FloatArray(n) }
         for (y in 0 until ch) for (x in 0 until cw) {
             val c = screen[(y0 + y) * w + x0 + x]
-            r[y * cw + x] = Color.red(c).toFloat(); g[y * cw + x] = Color.green(c).toFloat(); b[y * cw + x] = Color.blue(c).toFloat()
+            rgb[0][y * cw + x] = Color.red(c).toFloat(); rgb[1][y * cw + x] = Color.green(c).toFloat(); rgb[2][y * cw + x] = Color.blue(c).toFloat()
         }
-        val radius = max(1, (BLUR * w / REFERENCE_WIDTH).roundToInt())
-        for (channel in arrayOf(r, g, b)) repeat(3) {
+        val unit = w / REFERENCE_WIDTH
+        val panel = panelFit(rgb, cw, ch, max(1, (PANEL_BAND_FROM * unit).roundToInt()), max(2, (PANEL_BAND_TO * unit).roundToInt()))
+        // Opacity from how far the luma stands out (up to white or down to black); premultiplied colour.
+        val alpha = FloatArray(n)
+        val marks = Array(3) { FloatArray(n) }
+        for (i in 0 until n) {
+            val t = (rgb[0][i] * 3 + rgb[1][i] * 6 + rgb[2][i]) / 10f
+            val p = (panel[0][i] * 3 + panel[1][i] * 6 + panel[2][i]) / 10f
+            val d = t - p
+            if (abs(d) < MARK_MIN_STEP) continue
+            val a = (if (d > 0) d / max(1f, 255f - p) else -d / max(1f, p)).coerceIn(0f, 1f)
+            alpha[i] = a
+            for (c in 0..2) marks[c][i] = (rgb[c][i] - (1 - a) * panel[c][i]).coerceIn(0f, a * 255f)
+        }
+        val strength = alpha.sum() / n
+        val radius = max(1, (BLUR * unit).roundToInt())
+        for (channel in arrayOf(alpha, marks[0], marks[1], marks[2])) repeat(3) {
             boxBlur(channel, cw, ch, radius, horizontal = true)
             boxBlur(channel, cw, ch, radius, horizontal = false)
         }
-        val px = IntArray(cw * ch) { Color.rgb(r[it].roundToInt(), g[it].roundToInt(), b[it].roundToInt()) }
-        return Bitmap.createBitmap(px, cw, ch, Bitmap.Config.ARGB_8888)
+        val px = IntArray(n) {
+            val a = alpha[it]
+            if (a < 1f / 255f) 0 else Color.argb(
+                (a * 255).roundToInt(),
+                (marks[0][it] / a).roundToInt().coerceIn(0, 255),
+                (marks[1][it] / a).roundToInt().coerceIn(0, 255),
+                (marks[2][it] / a).roundToInt().coerceIn(0, 255),
+            )
+        }
+        return Bitmap.createBitmap(px, cw, ch, Bitmap.Config.ARGB_8888) to strength
+    }
+
+    /**
+     * A smooth fit (quadratic in x and y, per channel) of a [cw] x [ch] tile's panel, from its pixels
+     * [from] to [to] in from its edge.
+     */
+    private fun panelFit(rgb: Array<FloatArray>, cw: Int, ch: Int, from: Int, to: Int): Array<FloatArray> {
+        fun basis(x: Int, y: Int, out: DoubleArray) {
+            val bx = x.toDouble() / cw - 0.5; val by = y.toDouble() / ch - 0.5
+            out[0] = 1.0; out[1] = bx; out[2] = by; out[3] = bx * bx; out[4] = by * by; out[5] = bx * by
+        }
+        val k = 6
+        val ata = Array(k) { DoubleArray(k) }
+        val atb = Array(3) { DoubleArray(k) }
+        val v = DoubleArray(k)
+        for (y in 0 until ch) for (x in 0 until cw) {
+            val d = minOf(minOf(x, y), minOf(cw - 1 - x, ch - 1 - y))
+            if (d < from || d > to) continue
+            basis(x, y, v)
+            for (i in 0 until k) {
+                for (j in 0 until k) ata[i][j] += v[i] * v[j]
+                for (c in 0..2) atb[c][i] += v[i] * rgb[c][y * cw + x]
+            }
+        }
+        val coef = Array(3) { c -> solve(Array(k) { ata[it].copyOf() }, atb[c].copyOf()) }
+        val out = Array(3) { FloatArray(cw * ch) }
+        for (y in 0 until ch) for (x in 0 until cw) {
+            basis(x, y, v)
+            for (c in 0..2) {
+                val cf = coef[c]
+                // Without a fit (no band: a tiny tile), the panel is taken as the tile itself: no marks.
+                out[c][y * cw + x] = if (cf == null) rgb[c][y * cw + x] else (0 until k).sumOf { v[it] * cf[it] }.toFloat()
+            }
+        }
+        return out
+    }
+
+    /** Solves [a] x = [b] (Gaussian elimination, partial pivoting); null if singular. */
+    private fun solve(a: Array<DoubleArray>, b: DoubleArray): DoubleArray? {
+        val n = b.size
+        for (col in 0 until n) {
+            val p = (col until n).maxBy { abs(a[it][col]) }
+            if (abs(a[p][col]) < 1e-9) return null
+            a[col] = a[p].also { a[p] = a[col] }; b[col] = b[p].also { b[p] = b[col] }
+            for (r in col + 1 until n) {
+                val f = a[r][col] / a[col][col]
+                for (c in col until n) a[r][c] -= f * a[col][c]
+                b[r] -= f * b[col]
+            }
+        }
+        val x = DoubleArray(n)
+        for (r in n - 1 downTo 0) {
+            var s = b[r]
+            for (c in r + 1 until n) s -= a[r][c] * x[c]
+            x[r] = s / a[r][r]
+        }
+        return x
     }
 
     /** One box-blur pass of [m] ([w] x [h]) along rows or columns, edges clamped. */
