@@ -121,6 +121,14 @@ class MainActivity : Activity() {
             .onClick { BankGuard.forgetAll(this); refresh() }
         page.addView(card(bankRow, forgetRow))
 
+        // About.
+        page.addView(header("About"))
+        page.addView(card(
+            Row("Test version", "Expect bugs · use at your own risk")
+                .trailing(chevron())
+                .onClick { showTestVersionNotice() },
+        ))
+
         page.addView(TextView(this).apply {
             text = "No internet access · nothing leaves your phone"
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
@@ -280,6 +288,22 @@ class MainActivity : Activity() {
     }
 
     // ---- Building blocks ----
+
+    /** The short form of DISCLAIMER.md. */
+    private fun showTestVersionNotice() {
+        AlertDialog.Builder(this)
+            .setTitle("Test version")
+            .setMessage(
+                "FlipFix is experimental. It was built and tested by one developer on one Galaxy Z Flip8 and " +
+                    "relies on undocumented One UI behaviour, so expect bugs, and a Samsung update can break it " +
+                    "at any time.\n\n" +
+                    "It's provided as is, without warranty: you use it at your own risk, and the developer isn't " +
+                    "responsible for any problems with your phone.\n\n" +
+                    "To stop it, unfold the phone, use the Quick Settings tile, or uninstall the app.",
+            )
+            .setPositiveButton("OK", null)
+            .show()
+    }
 
     private fun header(title: String) = TextView(this).apply {
         text = title

@@ -2,7 +2,9 @@
 
 **Keep your Galaxy Z Flip cover-screen video playing after you unlock — the way it worked before One UI 9.**
 
-[ELI5 Version](#eli5-version) · [Nerd Stuff](#nerd-stuff)
+> **Experimental test software.** FlipFix is new, was built and tested by one developer on one phone, and relies on undocumented Samsung behaviour. Expect bugs, and use it at your own risk: read the [disclaimer](DISCLAIMER.md) before installing.
+
+[ELI5 Version](#eli5-version) · [Nerd Stuff](#nerd-stuff) · [Disclaimer](DISCLAIMER.md)
 
 <!-- Replace the line below with a short screen recording (demo.gif) or side-by-side screenshot -->
 <!-- ![FlipFix Demo](demo.gif) -->
@@ -204,6 +206,8 @@ The [`tools/`](tools/) folder includes Windows PowerShell scripts to inspect how
 ---
 
 ## Disclaimer & License
+
+FlipFix is experimental test software, provided "as is" without warranty of any kind: you install and use it at your own risk, and the author and contributors are not responsible for any problem it causes. Read the full [disclaimer](DISCLAIMER.md) for how it was tested, what wasn't tested, its battery use and how to remove it.
 
 FlipFix is an independent open-source project and is not affiliated with, endorsed by, or associated with Samsung Electronics. Galaxy, One UI and Samsung Wallet are trademarks of Samsung Electronics. It relies on undocumented One UI behaviour that a future update may change.
 
