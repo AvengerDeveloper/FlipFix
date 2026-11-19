@@ -151,8 +151,8 @@ class CoverClockRenderer(private val context: Context) {
             DateFormat.getBestDateTimePattern(locale, if (l.dateLongMonth) "EEEdMMMM" else "EEEdMMM"), now,
         ).toString()
         twoLinePaint.typeface = tf
-        twoLinePaint.fontFeatureSettings = null
-        twoLinePaint.letterSpacing = 0f
+        twoLinePaint.fontFeatureSettings = if (l.timeSpacing != null) CoverClockFonts.NO_KERNING else null
+        twoLinePaint.letterSpacing = l.timeSpacing ?: 0f
         twoLinePaint.shader = null
         twoLinePaint.textSize = l.timeTextSizeFrac * screenH
         twoLinePaint.color = l.color or 0xFF000000.toInt()

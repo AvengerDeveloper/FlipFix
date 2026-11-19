@@ -23,6 +23,7 @@ import android.media.session.PlaybackState
 import android.os.SystemClock
 import android.util.AttributeSet
 import android.util.Log
+import android.view.Choreographer
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewConfiguration
@@ -75,6 +76,19 @@ class CoverMediaView @JvmOverloads constructor(
     }
     private val fadePaint = Paint().apply { xfermode = PorterDuffXfermode(PorterDuff.Mode.DST_OUT) }
 
+    // Shaders kept between frames: the pill redraws many times a second while it moves. The colours follow
+    // the artwork (cleared in tintFromArt); the title's fades never move.
+    private var bgShader: Shader? = null
+    private var waveShader: Shader? = null
+    private var artShader: Shader? = null
+    private var artShaderFor: Bitmap? = null
+    private val fadeLeft by lazy {
+        LinearGradient(TITLE_LEFT, 0f, TITLE_LEFT + FADE, 0f, Color.BLACK, Color.TRANSPARENT, Shader.TileMode.CLAMP)
+    }
+    private val fadeRight by lazy {
+        LinearGradient(TITLE_RIGHT - FADE, 0f, TITLE_RIGHT, 0f, Color.TRANSPARENT, Color.BLACK, Shader.TileMode.CLAMP)
+    }
+
     private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop
     private var downX = 0f
     private var downY = 0f
@@ -113,6 +127,8 @@ class CoverMediaView @JvmOverloads constructor(
     }
 
     override fun onDetachedFromWindow() {
+        Choreographer.getInstance().removeFrameCallback(frameCallback)
+        frameQueued = false
         CoverState.stopObservingMediaNotifications(mediaNotificationsObserver)
         runCatching { sessions.removeOnActiveSessionsChangedListener(sessionsListener) }
         controller?.unregisterCallback(controllerCallback)
@@ -208,6 +224,36 @@ class CoverMediaView @JvmOverloads constructor(
             waveEdge = if (colourful) Color.HSVToColor(floatArrayOf(hue, 0.75f, 1f)) else DEFAULT_WAVE
         }
         waveLight = lighten(waveEdge, 0.45f)
+        bgShader = null
+        waveShader = null
+    }
+
+    /**
+     * While something moves, the pill redraws at a capped rate rather than at every refresh of the cover
+     * (up to 120 a second): 30 a second for the visualiser alone, 60 while the title scrolls. Each redraw
+     * draws the whole pill again.
+     */
+    private val frameCallback = Choreographer.FrameCallback { onFrame(it) }
+    private var frameQueued = false
+    private var lastFrameNanos = 0L
+
+    private fun scheduleFrame() {
+        if (frameQueued) return
+        frameQueued = true
+        Choreographer.getInstance().postFrameCallback(frameCallback)
+    }
+
+    private fun onFrame(frameTimeNanos: Long) {
+        frameQueued = false
+        if (!isAttachedToWindow) return
+        val interval = if (titleScrolls) SCROLL_FRAME_NANOS else WAVE_FRAME_NANOS
+        // Within a few ms counts as due: frames land on the display's refresh grid.
+        if (frameTimeNanos - lastFrameNanos >= interval - FRAME_SLACK_NANOS) {
+            lastFrameNanos = frameTimeNanos
+            invalidate()
+        } else {
+            scheduleFrame()
+        }
     }
 
     // ---- Drawing ----
@@ -238,7 +284,8 @@ class CoverMediaView @JvmOverloads constructor(
         clip.reset(); clip.addRoundRect(pill, radius, radius, Path.Direction.CW)
 
         // Background gradient.
-        fill.shader = LinearGradient(0f, pill.top, 0f, pill.bottom, bgTop, bgBottom, Shader.TileMode.CLAMP)
+        fill.shader = bgShader
+            ?: LinearGradient(0f, pill.top, 0f, pill.bottom, bgTop, bgBottom, Shader.TileMode.CLAMP).also { bgShader = it }
         canvas.drawPath(clip, fill)
         fill.shader = null
 
@@ -249,7 +296,7 @@ class CoverMediaView @JvmOverloads constructor(
         canvas.restore()
 
         openHit.set(pill.left, pill.top, ART_CX * sx + ART_R * sx, pill.bottom)
-        if (playing || titleScrolls) postInvalidateOnAnimation()
+        if (playing || titleScrolls) scheduleFrame()
     }
 
     private fun drawArt(canvas: Canvas, sx: Float, sy: Float) {
@@ -262,12 +309,16 @@ class CoverMediaView @JvmOverloads constructor(
             canvas.drawCircle(cx, cy, r, fill)
             return
         }
-        val scale = 2 * r / min(bmp.width, bmp.height)
-        val m = Matrix().apply {
-            setScale(scale, scale)
-            postTranslate(cx - bmp.width * scale / 2, cy - bmp.height * scale / 2)
+        if (artShaderFor !== bmp) {
+            val scale = 2 * r / min(bmp.width, bmp.height)
+            val m = Matrix().apply {
+                setScale(scale, scale)
+                postTranslate(cx - bmp.width * scale / 2, cy - bmp.height * scale / 2)
+            }
+            artShader = BitmapShader(bmp, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP).apply { setLocalMatrix(m) }
+            artShaderFor = bmp
         }
-        artPaint.shader = BitmapShader(bmp, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP).apply { setLocalMatrix(m) }
+        artPaint.shader = artShader
         canvas.drawCircle(cx, cy, r, artPaint)
     }
 
@@ -296,9 +347,9 @@ class CoverMediaView @JvmOverloads constructor(
         canvas.drawText(title, left - offset, baseline, titlePaint)
         canvas.drawText(title, left - offset + w + gap, baseline, titlePaint)
         val fade = FADE * sx
-        fadePaint.shader = LinearGradient(left, 0f, left + fade, 0f, Color.BLACK, Color.TRANSPARENT, Shader.TileMode.CLAMP)
+        fadePaint.shader = fadeLeft
         canvas.drawRect(left, top, left + fade, bottom, fadePaint)
-        fadePaint.shader = LinearGradient(right - fade, 0f, right, 0f, Color.TRANSPARENT, Color.BLACK, Shader.TileMode.CLAMP)
+        fadePaint.shader = fadeRight
         canvas.drawRect(right - fade, top, right, bottom, fadePaint)
         canvas.restoreToCount(layer)
     }
@@ -361,7 +412,8 @@ class CoverMediaView @JvmOverloads constructor(
         val maxH = WAVE_H * sy
         canvas.save()
         canvas.clipPath(clip)
-        fill.shader = LinearGradient(0f, bottom - maxH, 0f, bottom, waveEdge, waveLight, Shader.TileMode.CLAMP)
+        fill.shader = waveShader
+            ?: LinearGradient(0f, bottom - maxH, 0f, bottom, waveEdge, waveLight, Shader.TileMode.CLAMP).also { waveShader = it }
         path.reset()
         path.moveTo(pill.left, bottom)
         val steps = 48
@@ -442,6 +494,9 @@ class CoverMediaView @JvmOverloads constructor(
         const val FADE = 14f
         const val MARQUEE_SPEED = 30f // px per second
         const val MARQUEE_DELAY_MS = 1500L
+        const val WAVE_FRAME_NANOS = 1_000_000_000L / 30
+        const val SCROLL_FRAME_NANOS = 1_000_000_000L / 60
+        const val FRAME_SLACK_NANOS = 4_000_000L
         const val CONTROLS_CX = 218.5f
         const val CONTROLS_STEP = 72f
         const val ICON_T = 626f

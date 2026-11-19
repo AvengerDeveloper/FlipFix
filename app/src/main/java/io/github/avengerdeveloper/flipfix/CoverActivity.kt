@@ -5,6 +5,8 @@ import android.app.ActivityOptions
 import android.app.KeyguardManager
 import android.app.WallpaperManager
 import android.content.Intent
+import android.hardware.display.DisplayManager
+import android.os.PowerManager
 import android.os.Bundle
 import android.provider.Settings
 import android.util.Log
@@ -43,16 +45,13 @@ class CoverActivity : Activity() {
         clock = findViewById(R.id.clock)
         clock.glass = findViewById(R.id.glass)
         // A hidden face is brought back with Android's screenshot of it showing first: after a preset
-        // switch that would flash the old clock (for about 0.3 s), so it is retaken or skipped. (Closing
-        // the face instead shows Samsung's widget page for half a second while a new face is built.)
+        // switch that would flash the old clock (for about 0.3 s), so it is replaced or skipped.
         clock.onChangedWhileHidden = {
             if (!CoverState.showing) {
                 val alreadyOutdated = CoverState.faceOutdated
                 CoverState.faceOutdated = true
                 if (getSystemService(KeyguardManager::class.java)?.isKeyguardLocked == true && CoverState.isEnabled(this)) {
-                    // On every change while locked: the face may already be marked out of date by an
-                    // earlier change it hasn't redrawn for yet.
-                    waitBehindLockScreen()
+                    if (shown) replace("its clock changed")
                 } else if (!alreadyOutdated) {
                     Log.d(CoverState.TAG, "cover clock changed while hidden: next launch skips the old screenshot")
                 }
@@ -64,24 +63,30 @@ class CoverActivity : Activity() {
     }
 
     /**
-     * A preset is switched on Samsung's lock screen, and the unlock reveals whatever is right behind it,
-     * screenshot first, without FlipFix launching anything. So the face goes there now. On One UI 9's cover
-     * it resumes there for a moment (unseen: it can't show over the lock screen), draws its new clock, and
-     * Android's screenshot of it is retaken: filmed, the unlock went from the lock screen to the new face
-     * with only 2 frames of bare video between. Should it not get to redraw, the extra it carries has
-     * Android skip the old screenshot instead.
+     * Whether this face has been on screen: only then has Android a screenshot of it to show first. A face
+     * placed behind the lock screen and not yet unlocked to needs no replacing.
      */
-    private fun waitBehindLockScreen() {
-        val options = ActivityOptions.makeBasic().setLaunchDisplayId(display?.displayId ?: return)
-        val intent = Intent(this, CoverActivity::class.java)
-            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
-            .putExtra(CoverState.EXTRA_REDRAWN, true)
-        try {
-            startActivity(intent, options.toBundle())
-            Log.d(CoverState.TAG, "cover clock changed while hidden: face waits behind the lock screen, redrawn")
-        } catch (t: Throwable) {
-            Log.w(CoverState.TAG, "cover clock changed while hidden: couldn't wait behind the lock screen", t)
-        }
+    var shown = false
+        private set
+
+    /** Set by [replace]: the cover display a fresh face starts on once this one is gone, and why. */
+    private var replaceOn: Int? = null
+    private var replaceReason = ""
+
+    /**
+     * The unlock reveals whatever is right behind Samsung's lock screen, Android's screenshot of it first,
+     * taken as it last went away: the clock of a preset ago, or minutes ago. Behind the lock screen the face
+     * can't redraw to retake it (filmed on a Flip6 with One UI 9: brought forward there, it resumes for a
+     * moment but never gets a surface, and the unlock showed the previous preset's clock fading into the
+     * new one). So the face is closed with its task, and its screenshot with it, and a fresh one starts
+     * there (CoverState.placeFace) once it's gone: started with this one still there, Android would only
+     * bring this one forward (singleTask).
+     */
+    fun replace(reason: String) {
+        if (replaceOn != null || isFinishing) return
+        replaceOn = display?.displayId ?: return
+        replaceReason = reason
+        finishAndRemoveTask()
     }
 
     /** Samsung shows a navigation bar (back/home/recents) over cover apps; the cover face has none. */
@@ -144,11 +149,13 @@ class CoverActivity : Activity() {
         findViewById<View>(R.id.root).animate().cancel()
         findViewById<View>(R.id.root).apply { translationX = 0f; alpha = 1f }
         // Tell the edge peek once this face is really on screen, so its card can fade out on top of it.
-        window.decorView.viewTreeObserver.registerFrameCommitCallback { CoverState.notifyFaceShown() }
+        window.decorView.viewTreeObserver.registerFrameCommitCallback { shown = true; CoverState.notifyFaceShown() }
         hideNavigationBar()
         applyCoverTimeout()
         clock.invalidate()
         clock.reloadStyleAsync()
+        // Resumed with the cover off (a face placed behind the lock screen as it went off): no video to resume.
+        if (!CoverState.isCoverOn(getSystemService(DisplayManager::class.java), getSystemService(PowerManager::class.java))) return
         window.decorView.post { resumeVideo("resumed") }
         // Samsung pauses the video itself about 80 ms into the unlock, and the video takes no commands
         // from the face while Android's screenshot of it still covers it (up to ~0.3 s; seen in its log).
@@ -181,6 +188,7 @@ class CoverActivity : Activity() {
 
     override fun onDestroy() {
         if (CoverState.coverActivity?.get() === this) CoverState.coverActivity = null
+        replaceOn?.let { CoverState.placeFace(applicationContext, it, "replacing the face: $replaceReason") }
         super.onDestroy()
     }
 

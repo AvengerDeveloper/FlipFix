@@ -6,6 +6,7 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.hardware.display.DisplayManager
 import android.media.session.MediaSession
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.PowerManager
@@ -27,7 +28,8 @@ import android.view.Display
  * Samsung hides the cover display from ordinary apps, so waking the cover screen produces no display
  * callback here; SCREEN_ON/OFF broadcasts are what trigger a re-check in that case.
  *
- * It also publishes the notification icons shown at the top-left of the cover face.
+ * It also publishes the notification icons shown at the top-left of the cover face, refreshed only while the
+ * cover is lit.
  */
 class FlipNotificationListener : NotificationListenerService() {
 
@@ -37,10 +39,21 @@ class FlipNotificationListener : NotificationListenerService() {
     private var lastSnapshot = ""
 
     private val displayListener = object : DisplayManager.DisplayListener {
-        override fun onDisplayAdded(displayId: Int) = applyFoldRule("display $displayId added")
-        override fun onDisplayRemoved(displayId: Int) = applyFoldRule("display $displayId removed")
-        override fun onDisplayChanged(displayId: Int) = applyFoldRule("display $displayId changed")
+        override fun onDisplayAdded(displayId: Int) = onDisplayEvent("display $displayId added")
+        override fun onDisplayRemoved(displayId: Int) = onDisplayEvent("display $displayId removed")
+        override fun onDisplayChanged(displayId: Int) = onDisplayEvent("display $displayId changed")
     }
+
+    private fun onDisplayEvent(reason: String) {
+        if (screensOff) displayEventsWhileOff++
+        applyFoldRule(reason)
+    }
+
+    // From screen off to screen on, counted and logged once as a screen comes on: what wakes FlipFix while
+    // it has nothing to show.
+    private var screensOff = false
+    private var displayEventsWhileOff = 0
+    private var notificationChangesWhileOff = 0
 
     private val screenReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
@@ -50,6 +63,16 @@ class FlipNotificationListener : NotificationListenerService() {
                 CoverState.suspendedFor = null
                 CoverState.dismissed = false
                 BankGuard.onScreenOff()
+                screensOff = true
+                displayEventsWhileOff = 0
+                notificationChangesWhileOff = 0
+            } else if (intent.action == Intent.ACTION_SCREEN_ON && screensOff) {
+                screensOff = false
+                Log.d(
+                    CoverState.TAG,
+                    "while the screens were off: $displayEventsWhileOff display changes, " +
+                        "$notificationChangesWhileOff notification changes",
+                )
             }
             applyFoldRule(intent.action?.substringAfterLast('.') ?: "broadcast")
             // Display state can lag the broadcast slightly; check again shortly after.
@@ -61,7 +84,18 @@ class FlipNotificationListener : NotificationListenerService() {
         super.onListenerConnected()
         displayManager = getSystemService(DisplayManager::class.java)
         powerManager = getSystemService(PowerManager::class.java)
-        displayManager.registerDisplayListener(displayListener, handler)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.BAKLAVA) {
+            // Added, removed and changed (on, off, doze...), asked for explicitly: the older call can also
+            // deliver refresh-rate changes, which Android warns can come very often.
+            displayManager.registerDisplayListener(
+                mainExecutor,
+                DisplayManager.EVENT_TYPE_DISPLAY_ADDED or DisplayManager.EVENT_TYPE_DISPLAY_REMOVED or
+                    DisplayManager.EVENT_TYPE_DISPLAY_CHANGED,
+                displayListener,
+            )
+        } else {
+            displayManager.registerDisplayListener(displayListener, handler)
+        }
         val filter = IntentFilter().apply {
             addAction(Intent.ACTION_SCREEN_ON)
             addAction(Intent.ACTION_SCREEN_OFF)
@@ -72,10 +106,28 @@ class FlipNotificationListener : NotificationListenerService() {
         publishIcons()
     }
 
-    override fun onNotificationPosted(sbn: StatusBarNotification?, rankingMap: RankingMap?) = publishIcons()
+    override fun onNotificationPosted(sbn: StatusBarNotification?, rankingMap: RankingMap?) = requestIcons()
     override fun onNotificationRemoved(sbn: StatusBarNotification?, rankingMap: RankingMap?, reason: Int) {
         if (reason == REASON_CLICK) onNotificationOpened(sbn?.packageName)
-        publishIcons()
+        requestIcons()
+    }
+
+    /** A notification changed since the icons and the music pill were last published. */
+    private var iconsStale = true
+    private val publishIconsNow = Runnable { publishIcons() }
+
+    /**
+     * The icons and the music pill are only seen on the lit cover. While it's off (asleep, or the phone is
+     * open), a notification change only marks them stale, and they're refreshed once as it lights up
+     * (applyFoldRule) instead of reading every posted notification after each change. While it's on, a
+     * burst of changes (a notification and its ranking update) is refreshed once.
+     */
+    private fun requestIcons() {
+        iconsStale = true
+        if (screensOff) notificationChangesWhileOff++
+        if (!::displayManager.isInitialized || !CoverState.isCoverOn(displayManager, powerManager)) return
+        handler.removeCallbacks(publishIconsNow)
+        handler.postDelayed(publishIconsNow, ICONS_COALESCE_MS)
     }
 
     /**
@@ -94,7 +146,7 @@ class FlipNotificationListener : NotificationListenerService() {
         }
     }
 
-    override fun onNotificationRankingUpdate(rankingMap: RankingMap?) = publishIcons()
+    override fun onNotificationRankingUpdate(rankingMap: RankingMap?) = requestIcons()
 
     /**
      * Mirrors Samsung's cover icons (checked on One UI 9): one icon per app, newest first, skipping
@@ -102,7 +154,9 @@ class FlipNotificationListener : NotificationListenerService() {
      * players (Samsung shows those in its Now bar, never as an icon).
      */
     private fun publishIcons() {
+        handler.removeCallbacks(publishIconsNow)
         val active = runCatching { activeNotifications }.getOrNull() ?: return
+        iconsStale = false
         val ranking = currentRanking
         val r = Ranking()
         val icons = active
@@ -164,6 +218,7 @@ class FlipNotificationListener : NotificationListenerService() {
             lastSnapshot = snapshot
             Log.d(CoverState.TAG, "fold rule ($reason): $snapshot")
         }
+        if (coverOn && iconsStale) publishIcons()
         when {
             !CoverState.isEnabled(this) -> AccessibilityToggle.set(this, false, "FlipFix switched off")
             mainOn -> {
@@ -189,5 +244,6 @@ class FlipNotificationListener : NotificationListenerService() {
 
     private companion object {
         const val RECHECK_MS = 400L
+        const val ICONS_COALESCE_MS = 100L
     }
 }

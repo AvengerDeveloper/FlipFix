@@ -112,6 +112,15 @@ object CoverWidgets {
         return r.stamp == stamp && r.folder.isNotEmpty() && r.slots < MAX_SLOTS && r.looks < MAX_LOOKS
     }
 
+    /**
+     * A snapshot for [stamp] that couldn't be looked at for widgets (its clock didn't match, though [folder]
+     * had matched before): counts as a look, so the checks for widgets stay a few per switch.
+     */
+    fun missedLook(stamp: String, folder: String) {
+        val r = row
+        row = if (r != null && r.stamp == stamp && r.folder == folder) r.looked() else Row(stamp, folder, emptyList())
+    }
+
     /** The tiles of the active preset (none if it has no widgets or isn't known). */
     fun active(context: Context): List<Tile> {
         val r = row ?: return emptyList()

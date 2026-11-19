@@ -44,6 +44,7 @@ class CoverAccessibilityService : AccessibilityService() {
     private val unlockPoll = object : Runnable {
         override fun run() {
             if (!keyguardManager.isKeyguardLocked) {
+                noteUnlock()
                 maybeLaunch("unlock detected")
             } else if (SystemClock.uptimeMillis() < unlockPollDeadline) {
                 handler.postDelayed(this, UNLOCK_POLL_MS)
@@ -63,6 +64,7 @@ class CoverAccessibilityService : AccessibilityService() {
         override fun onReceive(context: Context, intent: Intent) {
             when (intent.action) {
                 Intent.ACTION_USER_PRESENT -> {
+                    noteUnlock()
                     CoverState.dismissed = false
                     maybeLaunch("unlocked")
                 }
@@ -77,6 +79,7 @@ class CoverAccessibilityService : AccessibilityService() {
                     edge.hide()
                     edge.releaseImages()
                     CoverState.widgetsSnapshot = null
+                    freshFaceBehindLockScreen()
                 }
             }
         }
@@ -126,6 +129,36 @@ class CoverAccessibilityService : AccessibilityService() {
 
     private val lockScreenCheck = Runnable { checkLockScreen() }
 
+    /** When the cover last unlocked (uptime), as first seen by the unlock poll or Android's broadcast. */
+    @Volatile private var unlockedAt = 0L
+
+    private fun noteUnlock() {
+        val now = SystemClock.uptimeMillis()
+        // One unlock is reported by both, a moment apart: keep the first.
+        if (now - unlockedAt > UNLOCK_GUARD_MS) unlockedAt = now
+    }
+
+    /**
+     * How far to trust a lock-screen snapshot taken at [shotAt] while [stamp] was current. A swipe up moves
+     * Samsung's lock screen for a moment before Android reports the unlock, so a snapshot from just before an
+     * unlock may show the clock on its way out (seen on a Flip6: the matched clock fitted at 0.20 instead of
+     * 0.99, and its match was lost); one from just before the cover went off may be fading out. Those keep
+     * only a sure match (CoverFaceMatcher.Doubt.LookAgain): a quick unlock right after switching presets
+     * still gets the new preset's clock. Runs on the matcher's thread: waits, if need be, until an unlock
+     * that close would have been reported.
+     */
+    private fun snapshotDoubt(shotAt: Long, stamp: String): CoverFaceMatcher.Doubt {
+        val wait = shotAt + UNLOCK_GUARD_MS - SystemClock.uptimeMillis()
+        if (wait > 0) SystemClock.sleep(wait)
+        return when {
+            CoverFaceMatcher.presetStamp(this) != stamp -> CoverFaceMatcher.Doubt.Discard("the preset changed meanwhile")
+            !CoverState.isCoverOn(displayManager, powerManager) -> CoverFaceMatcher.Doubt.LookAgain("the cover went off")
+            unlockedAt - shotAt in 0..UNLOCK_GUARD_MS ->
+                CoverFaceMatcher.Doubt.LookAgain("the cover unlocked ${unlockedAt - shotAt} ms after it")
+            else -> CoverFaceMatcher.Doubt.None
+        }
+    }
+
     /** Snapshots taken since the cover woke (or the preset was switched). */
     private var lockChecksThisWake = 0
 
@@ -157,8 +190,11 @@ class CoverAccessibilityService : AccessibilityService() {
                 !keyguardManager.isKeyguardLocked -> shot.recycle()
                 else -> {
                     val at = Date()
+                    val shotAt = SystemClock.uptimeMillis()
                     Thread {
-                        val retry = CoverFaceMatcher.match(applicationContext, shot, at, stamp, newTry)
+                        val retry = CoverFaceMatcher.match(applicationContext, shot, at, stamp, newTry) {
+                            snapshotDoubt(shotAt, stamp)
+                        }
                         if (retry && recheckIn != null) handler.post {
                             // A newer wake or switch reset the count and scheduled its own check.
                             if (lockChecksThisWake > 0 && !handler.hasCallbacks(lockScreenCheck)) {
@@ -292,6 +328,21 @@ class CoverAccessibilityService : AccessibilityService() {
         handler.post(unlockPoll)
     }
 
+    /**
+     * As the cover goes off: a fresh face waits behind the lock screen, so the next unlock shows the face as
+     * it is then, not Android's screenshot of it from now (a minute or a preset behind by then), and never
+     * Samsung's widget page first. See CoverActivity.replace.
+     */
+    private fun freshFaceBehindLockScreen() {
+        if (!CoverState.isEnabled(this)) return
+        val face = CoverState.coverActivity?.get() as? CoverActivity
+        if (face != null) {
+            if (face.shown) face.replace("cover off")
+        } else {
+            CoverState.placeFace(this, CoverState.coverDisplayId(displayManager), "cover off")
+        }
+    }
+
     private fun maybeLaunch(reason: String) {
         val skip = when {
             !CoverState.isEnabled(this) -> "FlipFix switched off"
@@ -306,6 +357,11 @@ class CoverAccessibilityService : AccessibilityService() {
         }
         if (skip != null) {
             Log.d(CoverState.TAG, "not launching ($reason): $skip")
+            // No face behind the lock screen (FlipFix was just installed or restarted, or the phone was
+            // open): the unlock would show Samsung's widget page until FlipFix launched one. Place one now.
+            if (skip == "still locked" && CoverState.coverActivity?.get() == null && !CoverState.dismissed) {
+                CoverState.placeFace(this, CoverState.coverDisplayId(displayManager), reason)
+            }
             return
         }
         // Several triggers fire for one unlock (poll, USER_PRESENT, Samsung's home); launch once.
@@ -353,6 +409,8 @@ class CoverAccessibilityService : AccessibilityService() {
         const val LOCK_SCREEN_CHECK_DELAY_MS = 350L
         /** After a miss, look again this much later (second and third snapshot of a wake: ~1.2 s, ~2.5 s). */
         val LOCK_SCREEN_RECHECK_DELAYS_MS = longArrayOf(850L, 1_300L)
+        /** Samsung's swipe-up takes about 300 ms to unlock, and Android's report of it up to ~150 ms more. */
+        const val UNLOCK_GUARD_MS = 700L
         /** After picking a preset, Samsung's picker closes and the lock screen redraws first. */
         const val PRESET_SWITCH_CHECK_DELAY_MS = 700L
     }

@@ -8,6 +8,7 @@ import android.graphics.Paint
 import android.graphics.Rect
 import android.graphics.Typeface
 import android.util.Log
+import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 
 /**
@@ -37,15 +38,66 @@ object CoverClockFonts {
 
     private val typefaces = ConcurrentHashMap<String, Typeface>()
 
-    /** [font] (a path inside the AOD app's assets) at [weight], or null if it can't be loaded. */
+    /**
+     * [font] at [weight], or null if it can't be loaded. [font] is a path inside the AOD app's assets, a
+     * system font file (an absolute path, see [GENERIC_FONTS]) or [SYSTEM_SANS].
+     */
     fun typeface(context: Context, font: String, weight: Int): Typeface? {
         val key = "$font@$weight"
         typefaces[key]?.let { return it }
         return runCatching {
-            val aod = context.createPackageContext(AOD_PACKAGE, 0)
-            Typeface.Builder(aod.assets, font).setFontVariationSettings("'wght' $weight").build()
+            when {
+                font == SYSTEM_SANS -> Typeface.create(Typeface.SANS_SERIF, weight.coerceIn(1, 1000), false)
+                // A missing file would quietly give the default font: check first.
+                font.startsWith("/") -> if (File(font).canRead()) {
+                    Typeface.Builder(File(font)).setFontVariationSettings("'wght' $weight").build()
+                } else {
+                    null
+                }
+                else -> {
+                    val aod = context.createPackageContext(AOD_PACKAGE, 0)
+                    Typeface.Builder(aod.assets, font).setFontVariationSettings("'wght' $weight").build()
+                }
+            }
         }.onFailure { Log.w(CoverState.TAG, "cover clock font unavailable: $font", it) }
             .getOrNull()?.also { typefaces[key] = it }
+    }
+
+    /**
+     * Fonts for a clock whose own font FlipFix can't find (one that isn't in the AOD app, or a template
+     * made before an update changed how Samsung draws it): One UI's sans (One UI 8 and later), else Roboto
+     * Flex (Android 12 and later), else the system sans. All have a weight axis or weights, so the face
+     * can match how bold Samsung draws the clock (see CoverFaceMatcher).
+     */
+    private val GENERIC_FONTS = listOf("/system/fonts/OneUISans-VF.ttf", "/system/fonts/RobotoFlex-Regular.ttf", SYSTEM_SANS)
+
+    /** [typeface]'s name for the system sans-serif family. */
+    const val SYSTEM_SANS = "sans-serif"
+
+    /** The first of [GENERIC_FONTS] that loads, or null (also for a clock without a template: CoverFaceMatcher.FALLBACK). */
+    fun genericFont(context: Context): String? = GENERIC_FONTS.firstOrNull { typeface(context, it, 400) != null }
+
+    /** Whether [font] is one of the stand-ins for an unknown font ([GENERIC_FONTS]). */
+    fun isGeneric(font: String?): Boolean = font in GENERIC_FONTS
+
+    private val weighted = ConcurrentHashMap<String, Boolean>()
+
+    /**
+     * Whether [font] looks different at different weights (a variable font, or the system sans), i.e.
+     * whether drawing it bolder or lighter can bring it closer to Samsung's: its "8" at 100 and at 900.
+     */
+    fun hasWeights(context: Context, font: String): Boolean = weighted.getOrPut(font) {
+        fun ink(weight: Int): Int {
+            val tf = typeface(context, font, weight) ?: return -1
+            val bmp = Bitmap.createBitmap(120, 120, Bitmap.Config.ALPHA_8)
+            Canvas(bmp).drawText("8", 10f, 100f, Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = tf; textSize = 90f })
+            val px = ByteArray(120 * 120).also { bmp.copyPixelsToBuffer(java.nio.ByteBuffer.wrap(it)) }
+            bmp.recycle()
+            return px.count { (it.toInt() and 0xFF) > 127 }
+        }
+        val light = ink(100)
+        val heavy = ink(900)
+        light > 0 && heavy > light * 1.1f
     }
 
     private fun fonts(context: Context): List<String> = runCatching {
@@ -79,6 +131,10 @@ object CoverClockFonts {
     /** [identifyFitted], remembered the same way. */
     fun identifyFittedCached(context: Context, key: String, samples: () -> List<Sample>): Match? =
         cached(context, "$key#fitted") { identifyFitted(context, samples()) }
+
+    /** [generic], remembered the same way. */
+    fun genericCached(context: Context, key: String, samples: () -> List<Sample>): Match? =
+        cached(context, "$key#generic") { generic(context, samples()) }
 
     private fun cached(context: Context, key: String, find: () -> Match?): Match? {
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -225,11 +281,49 @@ object CoverClockFonts {
      * font of another family (Samsung's fonts come in families, e.g. ClockStampVF and ClockStampMonoVF).
      */
     fun identifyFitted(context: Context, samples: List<Sample>): Match? {
-        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { fontFeatureSettings = NO_KERNING }
+        val scores = fonts(context).mapNotNull { font -> fittedWeight(context, font, samples) }
+        val best = scores.maxByOrNull { it.overlap }
+        val runnerUp = scores.filter { best != null && family(it.font) != family(best.font) }.maxOfOrNull { it.overlap } ?: 0f
+        val accepted = best?.takeIf { it.overlap >= FITTED_MIN && it.overlap - runnerUp >= FITTED_LEAD }
+        typefaces.keys.removeAll { key -> accepted == null || key != "${accepted.font}@${accepted.weight}" }
+        Log.d(CoverState.TAG, "cover clock font, fitted: $best, next family %.2f: %s".format(runnerUp, if (accepted != null) "used" else "not used"))
+        return accepted
+    }
+
+    /**
+     * [font] at the weight whose digits, drawn as in [identifyFitted], best cover [samples]; null if the
+     * font can't be loaded. A static font looks the same at every weight: scored once.
+     */
+    private fun fittedWeight(context: Context, font: String, samples: List<Sample>): Match? {
+        fun score(weight: Int): Match? = typeface(context, font, weight)?.let { tf ->
+            val (o, spacing) = fittedOverlap(tf, samples)
+            Match(font, weight, o, spacing)
+        }
+        val light = score(100) ?: return null
+        val heavy = score(900) ?: return null
+        var best = if (heavy.overlap > light.overlap) heavy else light
+        if (light.overlap != heavy.overlap) {
+            for (w in 200..800 step 100) score(w)?.let { if (it.overlap > best.overlap) best = it }
+            for (step in intArrayOf(50, 25)) {
+                val around = best.weight
+                for (w in intArrayOf(around - step, around + step)) {
+                    if (w !in 100..900) continue
+                    score(w)?.let { if (it.overlap > best.overlap) best = it }
+                }
+            }
+        }
+        return best
+    }
+
+    /**
+     * Coverage overlap of [samples] with [tf]'s text drawn without kerning, each sample's letter spacing
+     * fitted to its width; with the spacing used (em, mean over the samples).
+     */
+    private fun fittedOverlap(tf: Typeface, samples: List<Sample>): Pair<Float, Float> {
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { fontFeatureSettings = NO_KERNING; typeface = tf }
         val bounds = Rect()
-        val spacingOf = HashMap<Sample, Float>()
-        fun overlap(tf: Typeface): Float = overlap(samples, soft = true) { canvas, s ->
-            paint.typeface = tf
+        val spacings = FloatArray(samples.size)
+        val o = overlap(samples, soft = true) { canvas, s ->
             paint.letterSpacing = 0f
             paint.textSize = 200f
             paint.getTextBounds(s.text, 0, s.text.length, bounds)
@@ -241,39 +335,40 @@ object CoverClockFonts {
                 paint.letterSpacing = (extra / paint.textSize).coerceIn(-MAX_SPACING, MAX_SPACING)
                 paint.getTextBounds(s.text, 0, s.text.length, bounds)
             }
-            spacingOf[s] = paint.letterSpacing
+            spacings[samples.indexOf(s)] = paint.letterSpacing
             canvas.drawText(s.text, -bounds.left.toFloat(), -bounds.top.toFloat(), paint)
             bounds.width()
         }
+        return o to spacings.average().toFloat()
+    }
 
-        val scores = mutableListOf<Match>()
-        for (font in fonts(context)) {
-            fun score(weight: Int): Match? = typeface(context, font, weight)?.let { tf ->
-                val o = overlap(tf)
-                Match(font, weight, o, samples.map { spacingOf[it] ?: 0f }.average().toFloat())
-            }
-            val light = score(100) ?: continue
-            val heavy = score(900) ?: continue
-            var best = if (heavy.overlap > light.overlap) heavy else light
-            if (light.overlap != heavy.overlap) {
-                for (w in 200..800 step 100) score(w)?.let { if (it.overlap > best.overlap) best = it }
-                for (step in intArrayOf(50, 25)) {
-                    val around = best.weight
-                    for (w in intArrayOf(around - step, around + step)) {
-                        if (w !in 100..900) continue
-                        score(w)?.let { if (it.overlap > best.overlap) best = it }
-                    }
-                }
-            }
-            scores += best
+    /**
+     * The first of [GENERIC_FONTS] that loads, at the weight and letter spacing that best cover [samples]:
+     * for a clock no AOD font fits. Null if no such font loads, or if it covers the samples so poorly
+     * ([GENERIC_MIN]) that they aren't digits at all (e.g. the tiles of Samsung's widget-grid layout).
+     * The face draws it only where the template has the clock and as big; how bold Samsung shows the
+     * digits is fitted on the lock screen itself (see CoverFaceMatcher).
+     */
+    fun generic(context: Context, samples: List<Sample>): Match? {
+        // Text strokes leave most of their box empty; a widget tile or picture fills it.
+        val fill = samples.maxOfOrNull { s -> s.ink.count { it }.toFloat() / s.ink.size.coerceAtLeast(1) } ?: return null
+        if (fill > MAX_TEXT_FILL) {
+            Log.d(CoverState.TAG, "cover clock font, generic: not digits (ink fills %.0f%% of the box)".format(fill * 100))
+            return null
         }
-        val best = scores.maxByOrNull { it.overlap }
-        val runnerUp = scores.filter { best != null && family(it.font) != family(best.font) }.maxOfOrNull { it.overlap } ?: 0f
-        val accepted = best?.takeIf { it.overlap >= FITTED_MIN && it.overlap - runnerUp >= FITTED_LEAD }
-        typefaces.keys.removeAll { key -> accepted == null || key != "${accepted.font}@${accepted.weight}" }
-        Log.d(CoverState.TAG, "cover clock font, fitted: $best, next family %.2f: %s".format(runnerUp, if (accepted != null) "used" else "not used"))
+        val font = genericFont(context) ?: return null
+        val best = fittedWeight(context, font, samples)
+        val accepted = best?.takeIf { it.overlap >= GENERIC_MIN }
+        Log.d(CoverState.TAG, "cover clock font, generic: $best: ${if (accepted != null) "used" else "not digits"}")
         return accepted
     }
+
+    /**
+     * The generic font covers real template digits at 0.35 and up (Flip6: thin and heavy clock fonts it
+     * doesn't share a design with), a date read as digits at under 0.2.
+     */
+    private const val GENERIC_MIN = 0.3f
+    private const val MAX_TEXT_FILL = 0.65f
 
     /** Samsung's variants of one design (monospaced, fixed, variable) share a family. */
     private fun family(font: String) =

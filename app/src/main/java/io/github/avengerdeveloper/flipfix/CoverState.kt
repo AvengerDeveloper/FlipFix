@@ -1,7 +1,10 @@
 package io.github.avengerdeveloper.flipfix
 
 import android.app.Activity
+import android.app.ActivityOptions
 import android.content.Context
+import android.content.Intent
+import android.util.Log
 import android.graphics.Bitmap
 import android.graphics.drawable.Icon
 import java.lang.ref.WeakReference
@@ -103,10 +106,25 @@ object CoverState {
     /**
      * The face's clock or widgets changed while it was hidden (another cover preset), so the screenshot
      * Android took of it as it went away, which it shows first when the face comes back, is out of date.
-     * While locked the face redraws behind the lock screen at once (CoverActivity); otherwise the next
-     * launch has Android skip it (CoverAccessibilityService.maybeLaunch). Cleared once the face shows.
+     * While locked the face is replaced behind the lock screen at once (CoverActivity.replace); otherwise
+     * the next launch has Android skip it (CoverAccessibilityService.maybeLaunch). Cleared once the face shows.
      */
     @Volatile var faceOutdated = false
+
+    /**
+     * Starts a face on the cover ([displayId]) behind Samsung's lock screen, so the unlock goes straight to
+     * it instead of Samsung's widget page. Started afresh, it has no screenshot for Android to show first:
+     * the unlock shows it as soon as it has drawn, with the clock as it is then.
+     */
+    fun placeFace(context: Context, displayId: Int, reason: String) {
+        val intent = Intent(context, CoverActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        try {
+            context.startActivity(intent, ActivityOptions.makeBasic().setLaunchDisplayId(displayId).toBundle())
+            Log.d(TAG, "face placed behind the lock screen ($reason)")
+        } catch (t: Throwable) {
+            Log.w(TAG, "couldn't place the face behind the lock screen ($reason)", t)
+        }
+    }
 
     /**
      * On a launch of the face: Android shows its screenshot of a hidden face first only for a launch like

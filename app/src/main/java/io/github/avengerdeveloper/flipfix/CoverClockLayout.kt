@@ -137,6 +137,8 @@ sealed interface CoverClockLayout {
         val dateBaselineFrac: Float,
         val color: Int,
         val dateColor: Int,
+        /** Set: the time is drawn without kerning, with this letter spacing (em), as TwoLine.spacing. */
+        val timeSpacing: Float? = null,
     ) : CoverClockLayout
 
     /**
@@ -186,6 +188,7 @@ sealed interface CoverClockLayout {
 
     /** The digits' and the date's colours as the template has them, or null (a style FlipFix doesn't recolour). */
     fun inkColors(): Pair<Int, Int>? = when (this) {
+        is Horizontal -> style.color to style.color
         is TwoLine -> color to dateColor
         is Stacked -> color to color
         is Sideways -> color to dateColor
@@ -197,11 +200,69 @@ sealed interface CoverClockLayout {
      * unchanged. Only font digits take the [shade]; other styles are drawn in its middle colour.
      */
     fun withColors(digits: Int, date: Int, shade: Shade? = null): CoverClockLayout = when (this) {
+        is Horizontal -> copy(style = style.copy(color = shade?.middle(digits) ?: digits))
         is TwoLine -> copy(color = digits, dateColor = date, shade = shade)
         is Stacked -> copy(color = shade?.middle(digits) ?: digits)
         is Sideways -> copy(color = shade?.middle(digits) ?: digits, dateColor = date)
         else -> this
     }
+
+    /**
+     * The weight the digits are drawn at, for styles drawn in a font with weights (null: the style's digits
+     * have one look). The template only shows the weight the preset was made with; Samsung may draw it
+     * bolder or lighter now (seen on a Flip6 on One UI 9: thin template digits shown bold).
+     */
+    fun digitWeight(): Int? = when (this) {
+        is TwoLine -> weight.takeIf { paths == null && font.isNotEmpty() }
+        is Sideways -> timeWeight
+        else -> null
+    }
+
+    /** This clock with its colours left out: clocks equal but for their colours draw the same shapes. */
+    fun uncoloured(): CoverClockLayout = when (this) {
+        is Horizontal -> copy(style = style.copy(color = 0))
+        is TwoLine -> copy(color = 0, dateColor = 0, shade = null)
+        is Stacked -> copy(color = 0)
+        is Sideways -> copy(color = 0, dateColor = 0)
+        else -> this
+    }
+
+    /** The font the digits are drawn in, for styles drawn in a font (see CoverClockFonts.typeface). */
+    fun digitFont(): String? = when (this) {
+        is TwoLine -> font.takeIf { paths == null && font.isNotEmpty() }
+        is Sideways -> timeFont
+        else -> null
+    }
+
+    /** This clock with its digits at [weight] (see [digitWeight]); other styles unchanged. */
+    fun withDigitWeight(weight: Int): CoverClockLayout = when (this) {
+        is TwoLine -> if (paths == null && font.isNotEmpty()) copy(weight = weight) else this
+        is Sideways -> copy(timeWeight = weight)
+        else -> this
+    }
+
+    /**
+     * Whether this is hours over minutes in a font, whose lines Samsung may space differently from the
+     * template (seen on a Flip6 on One UI 9: thin stacked templates shown bold and bigger, with the hours and
+     * the date closer to the minutes, the date at the template's size). See [withLines].
+     */
+    fun hasLines(): Boolean = this is TwoLine && !oneLine && paths == null && font.isNotEmpty()
+
+    /**
+     * This clock (see [hasLines]) with its hours line moved down by [hoursDy] and its date by [dateDy]
+     * (fractions of the cover's height, before any resizing), and its date resized by [dateSize]; other
+     * styles unchanged.
+     */
+    fun withLines(hoursDy: Float, dateDy: Float, dateSize: Float): CoverClockLayout =
+        if (this is TwoLine && hasLines()) {
+            copy(
+                hoursBaselineFrac = hoursBaselineFrac + hoursDy,
+                dateBaselineFrac = dateBaselineFrac + dateDy,
+                dateTextSizeFrac = dateTextSizeFrac * dateSize,
+            )
+        } else {
+            this
+        }
 
     companion object {
         const val TEMPLATE_ROOT = "/data/overlays/coverwallpaper/0"
@@ -215,6 +276,10 @@ sealed interface CoverClockLayout {
         /** Clock lines start below this share of the template's height (above: the sample status icons). */
         private const val MIN_LINE_TOP = 0.05f
 
+        /** Where the sample status icons start and end at the latest (see Template.statusBottom). */
+        private const val STATUS_TOP = 0.06f
+        private const val STATUS_BOTTOM = 0.09f
+
         /**
          * Width Samsung's weather (gap + icon + temperature) takes after the date, per date ascender
          * height (Flip8 lock screen: 197 px after a 42.5 px-tall date).
@@ -227,10 +292,19 @@ sealed interface CoverClockLayout {
         /** Letters with ascenders: the template's date ("Wed 1 Feb") is sized by its tallest letters. */
         const val ASCENDERS = "bd"
 
-        /** The clock of the active cover preset (see CoverFaceMatcher), or [Unknown] for no clock. */
+        /**
+         * The clock of the active cover preset (see CoverFaceMatcher): its template's, or the one found on the
+         * lock screen itself for a preset without a template it can read (CoverFaceMatcher.FALLBACK); [Unknown]
+         * for no clock.
+         */
         fun load(context: Context): CoverClockLayout {
-            val file = CoverFaceMatcher.activeTemplate(context) ?: return Unknown
-            val layout = parse(context, file)
+            val parsed = CoverFaceMatcher.activeFallback(context) ?: run {
+                val file = CoverFaceMatcher.activeTemplate(context) ?: return Unknown
+                val variants = variants(context, file)
+                variants.getOrNull(CoverFaceMatcher.activeVariant(context)) ?: variants.firstOrNull() ?: return Unknown
+            }
+            val weighed = CoverFaceMatcher.activeWeight(context)?.let { parsed.withDigitWeight(it) } ?: parsed
+            val layout = CoverFaceMatcher.activeLines(context)?.let { weighed.withLines(it.hoursDy, it.dateDy, it.dateSize) } ?: weighed
             val colors = CoverFaceMatcher.activeColors(context) ?: return layout
             return layout.withColors(colors.digits, colors.date, colors.shade)
         }
@@ -270,21 +344,32 @@ sealed interface CoverClockLayout {
 
         private const val SHAPE_TOLERANCE = 0.03f
 
-        /** Parsed once per template file and modification time: presets rarely change, parsing is slow. */
-        private val parsed = java.util.concurrent.ConcurrentHashMap<String, Pair<Long, CoverClockLayout>>()
+        /**
+         * Parsed once per template file and modification time: presets rarely change, parsing is slow. Each
+         * template gives its clock as one or more [variants].
+         */
+        private val parsed = java.util.concurrent.ConcurrentHashMap<String, Pair<Long, List<CoverClockLayout>>>()
 
-        fun parse(context: Context, file: File): CoverClockLayout {
+        /** The clock of [file] (its first variant), or [Unknown]. */
+        fun parse(context: Context, file: File): CoverClockLayout = variants(context, file).firstOrNull() ?: Unknown
+
+        /**
+         * The ways [file]'s clock may be drawn: one, for a clock in a style or font FlipFix knows; for a font it
+         * doesn't, the closest AOD font and the generic font (see [fontChoices]): CoverFaceMatcher keeps the
+         * one that looks most like Samsung's lock screen. Empty if the template shows no clock FlipFix can read.
+         */
+        fun variants(context: Context, file: File): List<CoverClockLayout> {
             val stamp = file.lastModified()
-            parsed[file.path]?.let { (at, layout) -> if (at == stamp) return layout }
-            val layout = runCatching { fromTemplate(context, file) }
+            parsed[file.path]?.let { (at, layouts) -> if (at == stamp) return layouts }
+            val layouts = runCatching { fromTemplate(context, file) }
                 .onFailure { Log.w(CoverState.TAG, "cover clock template unreadable: ${file.parentFile?.name}", it) }
-                .getOrNull() ?: Unknown
-            parsed[file.path] = stamp to layout
-            return layout
+                .getOrNull().orEmpty()
+            parsed[file.path] = stamp to layouts
+            return layouts
         }
 
-        private fun fromTemplate(context: Context, file: File): CoverClockLayout {
-            val bmp = BitmapFactory.decodeFile(file.path) ?: return Unknown
+        private fun fromTemplate(context: Context, file: File): List<CoverClockLayout> {
+            val bmp = BitmapFactory.decodeFile(file.path) ?: return emptyList()
             val w = bmp.width
             val h = bmp.height
             val px = IntArray(w * h).also { bmp.getPixels(it, 0, w, 0, 0, w, h) }
@@ -293,26 +378,52 @@ sealed interface CoverClockLayout {
 
             // Ink bands below the sample status icons (top 10%); tiny gaps (dots, icons) are merged.
             val bands = t.bands(from = (h * 0.10f).toInt(), mergeGap = (h * 0.02f).toInt())
-            val layout = when {
+            val key = "${file.path}@${file.lastModified()}"
+            val layouts = when {
                 // A one-line clock is a thin band; a band filling the template is an illustrated face.
                 bands.size == 1 && bands[0].height < h * 0.2f ->
-                    Horizontal(CoverClockStyle.fromBand(t, bands[0]) ?: return Unknown)
+                    listOfNotNull(CoverClockStyle.fromBand(t, bands[0])?.let { Horizontal(it) })
                 bands.size == 2 && bands[1].height > bands[0].height * 1.8f ->
-                    stacked(context, t, bands[0], bands[1], "${file.path}@${file.lastModified()}")
-                else -> twoLine(context, t, "${file.path}@${file.lastModified()}").takeIf { it != Unknown }
-                    ?: oneLine(context, t, "${file.path}@${file.lastModified()}").takeIf { it != Unknown }
-                    ?: sideways(context, t, "${file.path}@${file.lastModified()}").takeIf { it != Unknown }
-                    ?: CoverClockAnalog.parse(t, dateFont(context))
+                    stacked(context, t, bands[0], bands[1], key)
+                else -> twoLine(context, t, key)
+                    .ifEmpty { oneLine(context, t, key) }
+                    .ifEmpty { sideways(context, t, key) }
+                    .ifEmpty { listOf(CoverClockAnalog.parse(t, dateFont(context))).filter { it != Unknown } }
             }
-            Log.d(CoverState.TAG, "cover clock from ${file.parentFile?.name}: bands=$bands -> $layout")
-            return layout
+            Log.d(CoverState.TAG, "cover clock from ${file.parentFile?.name}: bands=$bands -> ${layouts.ifEmpty { listOf(Unknown) }.joinToString(" or ")}")
+            return layouts
         }
 
+        /**
+         * Fonts to draw a clock in whose sample digits are [samples] (keyed [key]; [known]: the AOD font
+         * that covers them best, from CoverClockFonts.identify). An AOD font that fits them, as such or drawn
+         * the way Samsung draws some fonts ([CoverClockFonts.identifyFitted]), is the one choice: Samsung's
+         * own. Otherwise both the closest AOD font, if it comes [CLOSE_OVERLAP] close, and the generic font
+         * ([CoverClockFonts.generic]): the template may be older than how Samsung draws the clock now, and
+         * the lock screen shows which looks more like it. Empty: the samples aren't digits.
+         */
+        private fun fontChoices(
+            context: Context, key: String, samples: () -> List<CoverClockFonts.Sample>, known: CoverClockFonts.Match?,
+        ): List<CoverClockFonts.Match> {
+            if (known != null && known.overlap >= CoverClockFonts.MIN_OVERLAP) return listOf(known)
+            CoverClockFonts.identifyFittedCached(context, key, samples)?.let { return listOf(it) }
+            return listOfNotNull(
+                known?.takeIf { it.overlap >= CLOSE_OVERLAP },
+                CoverClockFonts.genericCached(context, key, samples),
+            )
+        }
+
+        /**
+         * An AOD font covering a template's digits this well (but less than CoverClockFonts.MIN_OVERLAP) may
+         * still be the preset's (seen on a Flip6: Capriola at 0.76 on one vertical clock, 0.80 on its sibling).
+         */
+        private const val CLOSE_OVERLAP = 0.65f
+
         /** Hours over minutes with a date line: three bands, two equal digit lines and a small date line. */
-        private fun twoLine(context: Context, t: Template, key: String): CoverClockLayout {
+        private fun twoLine(context: Context, t: Template, key: String): List<CoverClockLayout> {
             // Here the date sits close to the digits: only merge gaps within a line.
             val bands = t.bands(from = (t.h * 0.10f).toInt(), mergeGap = (t.h * 0.006f).toInt())
-            if (bands.size != 3) return Unknown
+            if (bands.size != 3) return emptyList()
             fun similar(a: Band, b: Band) = a.height >= b.height * 0.85f && a.height <= b.height * 1.18f
             val hours: Band; val minutes: Band; val date: Band
             when {
@@ -322,11 +433,11 @@ sealed interface CoverClockLayout {
                 similar(bands[0], bands[1]) && bands[2].height < bands[0].height * 0.45f -> {
                     hours = bands[0]; minutes = bands[1]; date = bands[2]
                 }
-                else -> return Unknown
+                else -> return emptyList()
             }
-            val hoursRect = t.inkRect(hours) ?: return Unknown
-            val minutesRect = t.inkRect(minutes) ?: return Unknown
-            val dateRect = t.inkRect(date) ?: return Unknown
+            val hoursRect = t.inkRect(hours) ?: return emptyList()
+            val minutesRect = t.inkRect(minutes) ?: return emptyList()
+            val dateRect = t.inkRect(date) ?: return emptyList()
             val samples = {
                 listOf(t.sample(SAMPLE_HOURS, hoursRect), t.sample(SAMPLE_MINUTES, minutesRect))
             }
@@ -338,8 +449,8 @@ sealed interface CoverClockLayout {
                 val inkCenter = (hoursRect.exactCenterX() + minutesRect.exactCenterX()) / 2
                 val align = alignOf(inkCenter, t.w)
                 val color = t.opaqueColor(hours) ?: Color.WHITE
-                val d = dateFields(t, dateRect, align, color, dateFont(context)) ?: return Unknown
-                return TwoLine(
+                val d = dateFields(t, dateRect, align, color, dateFont(context)) ?: return emptyList()
+                return listOf(TwoLine(
                     font = "", weight = 0, align = align, anchorXFrac = 0f, textSizeFrac = 0f,
                     hoursBaselineFrac = 0f, minutesBaselineFrac = 0f, color = color,
                     dateLongMonth = d.long, dateAnchorXFrac = d.anchor / t.w, dateTextSizeFrac = d.size / t.h,
@@ -354,12 +465,10 @@ sealed interface CoverClockLayout {
                         thickness = pathMatch.thickness,
                         digitSet = pathMatch.set,
                     ),
-                )
+                ))
             }
             val lines = listOf(SAMPLE_HOURS to hoursRect, SAMPLE_MINUTES to minutesRect)
-            if (font != null && font.overlap >= CoverClockFonts.MIN_OVERLAP) return fontClock(context, t, font, lines, dateRect)
-            val fitted = CoverClockFonts.identifyFittedCached(context, key, samples) ?: return Unknown
-            return fontClock(context, t, fitted, lines, dateRect)
+            return fontChoices(context, key, samples, font).mapNotNull { fontClock(context, t, it, lines, dateRect) }
         }
 
         /**
@@ -367,22 +476,19 @@ sealed interface CoverClockLayout {
          * two close together (a few pixels apart in the template, so only gaps that small split them). The
          * date is the line that is far wider for its height.
          */
-        private fun oneLine(context: Context, t: Template, key: String): CoverClockLayout {
+        private fun oneLine(context: Context, t: Template, key: String): List<CoverClockLayout> {
             val bands = t.bands(from = (t.h * 0.10f).toInt(), mergeGap = maxOf(2, (t.h * 0.003f).toInt()))
-            if (bands.size != 2) return Unknown
-            val rects = bands.map { t.inkRect(it) ?: return Unknown }
+            if (bands.size != 2) return emptyList()
+            val rects = bands.map { t.inkRect(it) ?: return emptyList() }
             fun aspect(r: android.graphics.Rect) = r.width().toFloat() / r.height().coerceAtLeast(1)
             val dateFirst = aspect(rects[0]) > aspect(rects[1])
             val (dateRect, digitsRect) = if (dateFirst) rects[0] to rects[1] else rects[1] to rects[0]
-            if (aspect(dateRect) < aspect(digitsRect) * DATE_ASPECT) return Unknown
+            if (aspect(dateRect) < aspect(digitsRect) * DATE_ASPECT) return emptyList()
             if (dateFirst) return stacked(context, t, bands[0], bands[1], "$key#tight", strict = true)
             val samples = { listOf(t.sample(SAMPLE_TIME, digitsRect)) }
-            val font = CoverClockFonts.identifyCached(context, "$key#below", samples)
-                ?.takeIf { it.overlap >= CoverClockFonts.MIN_OVERLAP }
-                ?: CoverClockFonts.identifyFittedCached(context, "$key#below", samples)
-                ?: return Unknown
-            Log.d(CoverState.TAG, "cover clock one line, date below: font $font")
-            return fontClock(context, t, font, listOf(SAMPLE_TIME to digitsRect), dateRect)
+            val fonts = fontChoices(context, "$key#below", samples, CoverClockFonts.identifyCached(context, "$key#below", samples))
+            Log.d(CoverState.TAG, "cover clock one line, date below: fonts $fonts")
+            return fonts.mapNotNull { fontClock(context, t, it, listOf(SAMPLE_TIME to digitsRect), dateRect) }
         }
 
         /** A date line is at least this much wider, for its height, than the digits' line. */
@@ -402,8 +508,8 @@ sealed interface CoverClockLayout {
         private fun fontClock(
             context: Context, t: Template, font: CoverClockFonts.Match,
             lines: List<Pair<String, android.graphics.Rect>>, dateRect: android.graphics.Rect,
-        ): CoverClockLayout {
-            val tf = CoverClockFonts.typeface(context, font.font, font.weight) ?: return Unknown
+        ): CoverClockLayout? {
+            val tf = CoverClockFonts.typeface(context, font.font, font.weight) ?: return null
             val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
                 typeface = tf
                 font.spacing?.let { fontFeatureSettings = CoverClockFonts.NO_KERNING; letterSpacing = it }
@@ -446,7 +552,7 @@ sealed interface CoverClockLayout {
             val blockLeft = lines.indices.map { origins[it] - (blockW - advances[it]) * share(lineAlign) }.average().toFloat()
             val anchor = blockLeft + blockW * share(align)
             val color = t.opaqueColor(Band(firstRect.top, firstRect.bottom - 1)) ?: Color.WHITE
-            val d = dateFields(t, dateRect, align, color, dateFont(context)) ?: return Unknown
+            val d = dateFields(t, dateRect, align, color, dateFont(context)) ?: return null
             return TwoLine(
                 font = font.font,
                 weight = font.weight,
@@ -541,9 +647,9 @@ sealed interface CoverClockLayout {
          * A one-line clock turned on its side (reading upwards): the template turned upright is a single
          * thin line of words, the time at one end.
          */
-        private fun sideways(context: Context, t: Template, key: String): CoverClockLayout {
+        private fun sideways(context: Context, t: Template, key: String): List<CoverClockLayout> {
             // Upright view: a quarter turn clockwise. Leave out the status icons and the camera shortcut.
-            val statusBottom = (t.h * SIDEWAYS_STATUS_BOTTOM).toInt()
+            val statusBottom = maxOf((t.h * SIDEWAYS_STATUS_BOTTOM).toInt(), t.statusBottom())
             val up = IntArray(t.w * t.h)
             for (y in statusBottom until t.h) for (x in 0 until t.w) {
                 if (x > t.w * CAMERA_LEFT && y > t.h * CAMERA_TOP) continue
@@ -551,7 +657,7 @@ sealed interface CoverClockLayout {
             }
             val u = Template(up, t.h, t.w, cameraCorner = false) // camera already left out
             val bands = u.bands(from = 0, mergeGap = (u.h * 0.006f).toInt())
-            val line = bands.singleOrNull()?.takeIf { it.height < u.h * 0.2f } ?: return Unknown
+            val line = bands.singleOrNull()?.takeIf { it.height < u.h * 0.2f } ?: return emptyList()
 
             // Words: column runs split by gaps wider than a quarter of the line height.
             val words = mutableListOf<Pair<Int, Int>>()
@@ -563,30 +669,49 @@ sealed interface CoverClockLayout {
                 last = x
             }
             if (start >= 0) words += start to last
-            if (words.size < 2) return Unknown
+            if (words.size < 2) return emptyList()
 
             fun rect(word: Pair<Int, Int>): android.graphics.Rect? {
                 val b = u.yRange(line, word.first, word.second) ?: return null
                 return android.graphics.Rect(word.first, b.top, word.second + 1, b.bottom + 1)
             }
-            // The time is at the end of the line, or (other order) at its start.
-            var timeFirst = false
-            var timeRect = rect(words.last()) ?: return Unknown
-            var font = CoverClockFonts.identifyCached(context, "$key#end") { listOf(u.sample(SAMPLE_TIME, timeRect)) }
-            if (font == null) {
-                timeFirst = true
-                timeRect = rect(words.first()) ?: return Unknown
-                font = CoverClockFonts.identifyCached(context, "$key#start") { listOf(u.sample(SAMPLE_TIME, timeRect)) }
-                    ?: return Unknown
+            // The time is at the end of the line, or (other order) at its start: where an AOD font fits it,
+            // else the end whose fonts (see [fontChoices]) fit it better; the date's end fits none.
+            val endRect = rect(words.last()) ?: return emptyList()
+            val startRect = rect(words.first()) ?: return emptyList()
+            fun samples(end: Boolean) = { listOf(u.sample(SAMPLE_TIME, if (end) endRect else startRect)) }
+            fun keyOf(end: Boolean) = "$key#${if (end) "end" else "start"}"
+            fun known(end: Boolean) = CoverClockFonts.identifyCached(context, keyOf(end), samples(end))
+            val knownEnd = known(end = true)
+            val (timeFirst, fonts) = if (knownEnd != null && knownEnd.overlap >= CoverClockFonts.MIN_OVERLAP) {
+                false to listOf(knownEnd)
+            } else {
+                val atEnd = fontChoices(context, keyOf(true), samples(true), knownEnd)
+                val atStart = fontChoices(context, keyOf(false), samples(false), known(end = false))
+                if ((atStart.maxOfOrNull { it.overlap } ?: 0f) > (atEnd.maxOfOrNull { it.overlap } ?: 0f)) true to atStart else false to atEnd
             }
+            Log.d(CoverState.TAG, "cover clock sideways: time ${if (timeFirst) "first" else "last"}, fonts $fonts")
+            val timeRect = if (timeFirst) startRect else endRect
             val dateWords = if (timeFirst) words.drop(1) else words.dropLast(1)
-            val dateBand = u.yRange(line, dateWords.first().first, dateWords.last().second) ?: return Unknown
+            val dateBand = u.yRange(line, dateWords.first().first, dateWords.last().second) ?: return emptyList()
+            return fonts.mapNotNull { sidewaysIn(context, u, it, timeFirst, timeRect, dateWords, dateBand) }
+        }
+
+        /** [sideways]' clock with the time ([timeRect] in the upright template [u]) drawn in [font]. */
+        private fun sidewaysIn(
+            context: Context, u: Template, font: CoverClockFonts.Match, timeFirst: Boolean,
+            timeRect: android.graphics.Rect, dateWords: List<Pair<Int, Int>>, dateBand: Band,
+        ): CoverClockLayout? {
             val dateLeft = dateWords.first().first
             val dateRight = dateWords.last().second + 1
-            val tf = CoverClockFonts.typeface(context, font.font, font.weight) ?: return Unknown
+            val tf = CoverClockFonts.typeface(context, font.font, font.weight) ?: return null
 
             val r = android.graphics.Rect()
-            val timePaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { typeface = tf; textSize = 200f }
+            val timePaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+                typeface = tf
+                textSize = 200f
+                font.spacing?.let { fontFeatureSettings = CoverClockFonts.NO_KERNING; letterSpacing = it }
+            }
             timePaint.getTextBounds(SAMPLE_TIME, 0, SAMPLE_TIME.length, r)
             timePaint.textSize = 200f * timeRect.height() / r.height().coerceAtLeast(1)
             timePaint.getTextBounds(SAMPLE_TIME, 0, SAMPLE_TIME.length, r)
@@ -625,6 +750,7 @@ sealed interface CoverClockLayout {
                 dateBaselineFrac = dateBaseline / u.h,
                 color = color,
                 dateColor = u.opaqueColor(dateBand) ?: color,
+                timeSpacing = font.spacing,
             )
         }
 
@@ -642,9 +768,9 @@ sealed interface CoverClockLayout {
          */
         private fun stacked(
             context: Context, t: Template, line: Band, digits: Band, key: String, strict: Boolean = false,
-        ): CoverClockLayout {
-            val (dx0, dx1) = t.xRange(digits) ?: return Unknown
-            val (lx0, lx1) = t.xRange(line) ?: return Unknown
+        ): List<CoverClockLayout> {
+            val (dx0, dx1) = t.xRange(digits) ?: return emptyList()
+            val (lx0, lx1) = t.xRange(line) ?: return emptyList()
             // The date is the first cluster of the line, up to a gap wider than half the line height
             // (then comes the weather icon). A big date alone on its line (found by [oneLine]) can have
             // word gaps that wide: there, only a gap of a full line height ends it.
@@ -658,14 +784,14 @@ sealed interface CoverClockLayout {
             val paths = pathMatch.overlap
             Log.d(CoverState.TAG, "cover clock one line: font $font, Samsung's path digits $pathMatch")
             val dateRect = android.graphics.Rect(lx0, dateBand.top, dateRight + 1, dateBand.bottom + 1)
+            val lines = listOf(SAMPLE_TIME to digitsRect)
             if (font != null && font.overlap >= CoverClockFonts.MIN_OVERLAP && font.overlap > paths) {
-                return fontClock(context, t, font, listOf(SAMPLE_TIME to digitsRect), dateRect)
+                return listOfNotNull(fontClock(context, t, font, lines, dateRect))
             }
             if (strict && paths < CoverClockFonts.MIN_OVERLAP) {
-                val fitted = CoverClockFonts.identifyFittedCached(context, "$key#line", samples) ?: return Unknown
-                return fontClock(context, t, fitted, listOf(SAMPLE_TIME to digitsRect), dateRect)
+                return fontChoices(context, "$key#line", samples, font).mapNotNull { fontClock(context, t, it, lines, dateRect) }
             }
-            return Stacked(
+            return listOf(Stacked(
                 digitsLeftFrac = dx0.toFloat() / t.w,
                 digitsBottomFrac = (digits.bottom + 1f) / t.h,
                 digitHeightFrac = digits.height.toFloat() / t.h,
@@ -676,7 +802,7 @@ sealed interface CoverClockLayout {
                 digitsTopAlpha = t.topAlpha(digits),
                 thickness = pathMatch.thickness,
                 digitSet = pathMatch.set,
-            )
+            ))
         }
 
         @Volatile private var dateFontCache: DateFont? = null
@@ -775,6 +901,26 @@ sealed interface CoverClockLayout {
             }
             if (start >= 0) out += Band(start, lastInk)
             return out
+        }
+
+        /**
+         * The row below the template's sample status icons: the first band of ink, if it starts within the
+         * top [STATUS_TOP] and ends within the top [STATUS_BOTTOM] of the template; 0 if there's no such band.
+         * (On a Flip6 they end 7 to 8% down, on a Flip8 above 6.5%.)
+         */
+        fun statusBottom(): Int {
+            val gap = maxOf(2, (h * 0.005f).toInt())
+            val limit = (h * STATUS_BOTTOM).toInt()
+            var top = -1; var last = -1
+            for (y in 0..minOf(h - 1, limit + gap)) {
+                if ((0 until w).any { ink(it, y) }) {
+                    if (top < 0) top = y
+                    last = y
+                } else if (top >= 0 && y - last > gap) {
+                    break
+                }
+            }
+            return if (top in 0..(h * STATUS_TOP).toInt() && last < limit) last + 1 else 0
         }
 
         fun xRange(b: Band): Pair<Int, Int>? {
