@@ -170,6 +170,19 @@ object CoverFaceMatcher {
     private const val KEY_VARIANT = "variant"
 
     /**
+     * One template's clock in two fonts of a family fits alike, within this, when the time shown has no digit
+     * the two draw apart (seen on a Flip6: 0.89 to 0.91 for both, 0.14 apart with a "1" in the time).
+     */
+    private const val VARIANT_TIE = 0.03f
+
+    /** Per template (folder and date), the font variant that fitted clearly better on a check: "key=variant;...". */
+    private const val KEY_FONT_VARIANTS = "font_variants"
+    private const val MAX_FONT_VARIANTS = 40
+
+    /** The kept clock's fonts fitted alike and none was told apart before: look again on the next wakes. */
+    private const val KEY_FONT_UNDECIDED = "font_undecided"
+
+    /**
      * Besides the best [SIZED_CANDIDATES], clocks drawn in a font with weights are sized and weighed too if
      * they fit within [REFINE_GAP] of the best at the template's weight (a thin template clock that Samsung
      * shows bold fits poorly until it is drawn bold), and clocks in a stand-in font always; at most
@@ -360,7 +373,9 @@ object CoverFaceMatcher {
         // Nothing matched, only weakly, or only the fallback clock (a template may fit a steadier lock screen):
         // try a few more wakes.
         val folder = p.getString(KEY_FOLDER, "").orEmpty()
-        val weak = folder.isEmpty() || folder == FALLBACK || p.getFloat(KEY_SCORE, SURE_SCORE) < SURE_SCORE
+        // So does a clock whose fonts fit alike at the time it was checked (see KEY_FONT_UNDECIDED).
+        val weak = folder.isEmpty() || folder == FALLBACK || p.getFloat(KEY_SCORE, SURE_SCORE) < SURE_SCORE ||
+            p.getBoolean(KEY_FONT_UNDECIDED, false)
         return weak && p.getInt(KEY_TRIES, 0) < MAX_TRIES
     }
 
@@ -846,8 +861,32 @@ object CoverFaceMatcher {
         val byWallpaper = if (fitting.size > 1) fitting.filter { ofWallpaper(it) }.maxByOrNull { it.fit.score } else null
         val ambiguous = contenders.size > 1 && top < SURE_SCORE && !onePlace(contenders) && byWallpaper == null
         val chosen = byWallpaper ?: if (ambiguous) null else contenders.minWithOrNull(compareBy<Candidate>({ colourGap(it) }, { -it.fit.score }))
+        // One template's clock in the fonts of one family (CoverClockLayout.variants) fits alike when the time
+        // on screen has no digit they draw apart (seen on a Flip6: the orange cat's clock in ClockModexVF and
+        // ClockModexMonoVF fitted 0.90 and 0.89 at 23:33, 0.77 and 0.91 at 23:31, its "1" drawn apart). Then
+        // the font that fitted clearly better on an earlier check is kept; never seen apart, the template's
+        // own, and the lock screen is looked at again on the next wakes ([KEY_FONT_UNDECIDED]).
+        fun variantOf(c: Candidate): Int = c.files.maxByOrNull { it.lastModified() }
+            ?.let { CoverClockLayout.variants(context, it).indexOf(c.parsed) } ?: -1
+        val siblings = chosen?.let { ch -> likely.filter { it !== ch && it.files.toSet() == ch.files.toSet() } }.orEmpty()
+        val tiedSiblings = siblings.filter { it.fit.score >= chosen!!.fit.score - VARIANT_TIE }
+        val fontKey = chosen?.files?.maxByOrNull { it.lastModified() }?.let { "${it.parentFile?.name}@${it.lastModified()}" }
+        val knownFont = fontKey?.let { knownVariant(context, it) }
+        // The font this check tells apart (clearly the best of its template's fonts), to remember.
+        val fontSeen = if (chosen != null && siblings.isNotEmpty() && tiedSiblings.isEmpty() && chosen.fit.score >= SURE_SCORE) variantOf(chosen) else null
+        var fontUndecided = false
+        var fontInfo = ""
+        val picked = if (chosen == null || tiedSiblings.isEmpty()) chosen else {
+            val tied = listOf(chosen) + tiedSiblings
+            tied.firstOrNull { knownFont != null && variantOf(it) == knownFont }
+                ?.also { fontInfo = " (its fonts fit alike at this time: ${fontName(it.layout) ?: "the one"} that fitted better before)" }
+                ?: tied.minBy { variantOf(it).let { v -> if (v < 0) Int.MAX_VALUE else v } }.also {
+                    fontUndecided = true
+                    fontInfo = " (its fonts fit alike at this time: the template's, to look again)"
+                }
+        }
         val refinedAt = SystemClock.uptimeMillis()
-        val best = chosen?.let { relined(it) }
+        val best = picked?.let { relined(it) }
         val linedAt = SystemClock.uptimeMillis()
         // A weak fit also needs Samsung to show the clock's colour (or a tint of it) somewhere under its ink,
         // and the clock near its template's size (seen on a Flip6: right weak fits at 100 to 108%, a white
@@ -901,13 +940,19 @@ object CoverFaceMatcher {
                 return false
             }
         }
-        // Nor does a weaker fit replace a better one (see [KEY_SCORE]); a match by an earlier version may, and
-        // a template's match replaces a fallback clock however it scores.
+        if (fontSeen != null && fontSeen >= 0 && templateFit === best) rememberVariant(context, fontKey!!, fontSeen)
+        // Nor does a weaker fit replace a better one (see [KEY_SCORE]); a match by an earlier version may, a
+        // template's match replaces a fallback clock however it scores, and so does the same preset's clock in
+        // the font this check tells apart from the one kept.
         val keptScore = if (sameVersion) p.getFloat(KEY_SCORE, SURE_SCORE) else 0f
-        val weaker = matchedFit != null && matchedFit.fit.score < keptScore && !(kept == FALLBACK && matched != FALLBACK)
+        val fontChange = fontSeen != null && matched == kept && variant != p.getInt(KEY_VARIANT, 0)
+        val weaker = matchedFit != null && matchedFit.fit.score < keptScore && !(kept == FALLBACK && matched != FALLBACK) && !fontChange
         if (kept != null && (matched == null || weaker)) {
-            p.edit().putInt(KEY_TRIES, tries).putLong(KEY_VERSION, version).putFloat(KEY_SCORE, keptScore)
-                .putBoolean(KEY_LOOK_AGAIN, false).apply()
+            val keptEdit = p.edit().putInt(KEY_TRIES, tries).putLong(KEY_VERSION, version).putFloat(KEY_SCORE, keptScore)
+                .putBoolean(KEY_LOOK_AGAIN, false)
+            // (The kept clock's font told apart: it is the one, no need to look again.)
+            if (fontSeen != null && matched == kept) keptEdit.putBoolean(KEY_FONT_UNDECIDED, false)
+            keptEdit.apply()
             CoverWidgets.missedLook(stamp, kept)
             Log.d(
                 CoverState.TAG,
@@ -936,6 +981,7 @@ object CoverFaceMatcher {
             .putInt(KEY_TRIES, tries)
             .putLong(KEY_VERSION, version)
             .putBoolean(KEY_LOOK_AGAIN, lookAgain)
+            .putBoolean(KEY_FONT_UNDECIDED, fontUndecided && templateFit != null)
         var colorInfo = ""
         val shownColors = matchedFit?.let { clockColors(it, w, h) }
         val brightness = (lumaSum / screen.size).toInt()
@@ -972,6 +1018,7 @@ object CoverFaceMatcher {
                 (matchedFit?.takeIf { it.size != 1f }?.let { " at ${"%.0f".format(it.size * 100)}% size" } ?: "") +
                 (matchedFit?.weight?.let { " at weight $it" } ?: "") +
                 (matchedFit?.layout?.let { fontName(it) }?.let { " in $it" } ?: "") +
+                (if (templateFit != null) fontInfo else "") +
                 (matchedFit?.lines?.let {
                     " with the hours line moved ${"%.0f".format(it.hoursDy * coverH)} px, the date ${"%.0f".format(it.dateDy * coverH)} px" +
                         (if (it.dateSize != 1f) " at ${"%.0f".format(it.dateSize * 100)}%" else "")
@@ -1002,6 +1049,18 @@ object CoverFaceMatcher {
 
     /** Which of the active preset's CoverClockLayout.variants looked like Samsung's lock screen (0: the first). */
     fun activeVariant(context: Context): Int = prefs(context).getInt(KEY_VARIANT, 0)
+
+    /** The font variant remembered for a template ([key]: its folder and date, see [KEY_FONT_VARIANTS]), if any. */
+    private fun knownVariant(context: Context, key: String): Int? =
+        prefs(context).getString(KEY_FONT_VARIANTS, null)?.split(';')
+            ?.firstOrNull { it.startsWith("$key=") }?.substringAfter('=')?.toIntOrNull()
+
+    private fun rememberVariant(context: Context, key: String, variant: Int) {
+        val p = prefs(context)
+        val others = p.getString(KEY_FONT_VARIANTS, null)?.split(';')
+            ?.filter { it.isNotEmpty() && !it.startsWith("$key=") }.orEmpty()
+        p.edit().putString(KEY_FONT_VARIANTS, (others.takeLast(MAX_FONT_VARIANTS - 1) + "$key=$variant").joinToString(";")).apply()
+    }
 
     fun activePlacement(context: Context): Placement {
         if (!known(context)) return Placement()

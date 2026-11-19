@@ -372,7 +372,20 @@ object CoverClockFonts {
 
     /** Samsung's variants of one design (monospaced, fixed, variable) share a family. */
     private fun family(font: String) =
-        font.substringAfterLast('/').substringBeforeLast('.').replace(Regex("Mono|_H|_Fixed|Fixed|VF|-Regular"), "")
+        font.substringAfterLast('/').substringBeforeLast('.').replace(Regex("Mono|Default|_H|_Fixed|Fixed|VF|-Regular"), "")
+
+    /**
+     * The other AOD fonts of [match]'s family (e.g. ClockModexMonoVF for ClockModexVF), at its weight and
+     * spacing. One UI may draw a preset in another font of the family than its template was made in: on a
+     * Flip6 with One UI 9, the orange cat preset's clock, ClockModexVF in its template, is drawn in
+     * ClockModexMonoVF, whose digits all take one width. Drawn in ClockModexVF, its narrow "1"s moved the
+     * digits beside them, and the clock fitted 0.42 to 0.56 whenever the time had two 1s in it.
+     */
+    fun siblings(context: Context, match: Match): List<Match> {
+        if (isGeneric(match.font)) return emptyList()
+        val family = family(match.font)
+        return fonts(context).filter { it != match.font && family(it) == family }.map { match.copy(font = it) }
+    }
 
     /** Paint.fontFeatureSettings that turns kerning off (fonts matched by [identifyFitted]). */
     const val NO_KERNING = "'kern' 0"

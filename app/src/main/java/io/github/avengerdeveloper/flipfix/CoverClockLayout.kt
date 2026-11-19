@@ -354,9 +354,10 @@ sealed interface CoverClockLayout {
         fun parse(context: Context, file: File): CoverClockLayout = variants(context, file).firstOrNull() ?: Unknown
 
         /**
-         * The ways [file]'s clock may be drawn: one, for a clock in a style or font FlipFix knows; for a font it
-         * doesn't, the closest AOD font and the generic font (see [fontChoices]): CoverFaceMatcher keeps the
-         * one that looks most like Samsung's lock screen. Empty if the template shows no clock FlipFix can read.
+         * The ways [file]'s clock may be drawn: for a clock in a font FlipFix knows, that font and the others of
+         * its family; for a font it doesn't, the closest AOD font and the generic font (see [fontChoices]):
+         * CoverFaceMatcher keeps the one that looks most like Samsung's lock screen. Empty if the template
+         * shows no clock FlipFix can read.
          */
         fun variants(context: Context, file: File): List<CoverClockLayout> {
             val stamp = file.lastModified()
@@ -405,13 +406,20 @@ sealed interface CoverClockLayout {
         private fun fontChoices(
             context: Context, key: String, samples: () -> List<CoverClockFonts.Sample>, known: CoverClockFonts.Match?,
         ): List<CoverClockFonts.Match> {
-            if (known != null && known.overlap >= CoverClockFonts.MIN_OVERLAP) return listOf(known)
-            CoverClockFonts.identifyFittedCached(context, key, samples)?.let { return listOf(it) }
+            if (known != null && known.overlap >= CoverClockFonts.MIN_OVERLAP) return withSiblings(context, known)
+            CoverClockFonts.identifyFittedCached(context, key, samples)?.let { return withSiblings(context, it) }
             return listOfNotNull(
                 known?.takeIf { it.overlap >= CLOSE_OVERLAP },
                 CoverClockFonts.genericCached(context, key, samples),
             )
         }
+
+        /**
+         * [font] and the other fonts of its family (CoverClockFonts.siblings): the template shows the font the
+         * preset was made in, and One UI may now draw it in a sibling; the lock screen shows which.
+         */
+        private fun withSiblings(context: Context, font: CoverClockFonts.Match): List<CoverClockFonts.Match> =
+            listOf(font) + CoverClockFonts.siblings(context, font)
 
         /**
          * An AOD font covering a template's digits this well (but less than CoverClockFonts.MIN_OVERLAP) may
@@ -684,7 +692,7 @@ sealed interface CoverClockLayout {
             fun known(end: Boolean) = CoverClockFonts.identifyCached(context, keyOf(end), samples(end))
             val knownEnd = known(end = true)
             val (timeFirst, fonts) = if (knownEnd != null && knownEnd.overlap >= CoverClockFonts.MIN_OVERLAP) {
-                false to listOf(knownEnd)
+                false to withSiblings(context, knownEnd)
             } else {
                 val atEnd = fontChoices(context, keyOf(true), samples(true), knownEnd)
                 val atStart = fontChoices(context, keyOf(false), samples(false), known(end = false))
@@ -786,7 +794,7 @@ sealed interface CoverClockLayout {
             val dateRect = android.graphics.Rect(lx0, dateBand.top, dateRight + 1, dateBand.bottom + 1)
             val lines = listOf(SAMPLE_TIME to digitsRect)
             if (font != null && font.overlap >= CoverClockFonts.MIN_OVERLAP && font.overlap > paths) {
-                return listOfNotNull(fontClock(context, t, font, lines, dateRect))
+                return withSiblings(context, font).mapNotNull { fontClock(context, t, it, lines, dateRect) }
             }
             if (strict && paths < CoverClockFonts.MIN_OVERLAP) {
                 return fontChoices(context, "$key#line", samples, font).mapNotNull { fontClock(context, t, it, lines, dateRect) }
