@@ -81,7 +81,7 @@ Once unlocked while folded, FlipFix keeps your cover screen intact:
 | **Widgets under the clock** | Frosted glass, non-working placeholders in the same spots and shapes, your video moving behind them. FlipFix is optimized for widgetless cover screens: live widgets would need extra permissions. Swipe left or right for the real ones |
 | **Swipe left (or right)** | Opens Samsung's widgets as before — your cover face shrinks away as a card following your finger |
 | **Swipe right from left edge** | Returns from widgets back to your video, with the card sliding back in |
-| **Swipe up** | Opens Samsung Wallet |
+| **Swipe up** (or the Wallet handle at the bottom) | Opens Samsung Wallet's quick-pay cards, as Samsung's own handle does. The handle is also kept on the locked cover, where Samsung's disappears while FlipFix is on. It shows only if Samsung Wallet is installed and its own cover handle is on (**Wallet → Quick access → Cover screen**). Wallet keeps that setting private, so FlipFix follows what it last saw on Samsung's widget screen |
 | **Swipe down from top edge** | Opens Samsung's native notification panel (FlipFix does not intercept it) |
 | **Leave it untouched** | The cover turns off after Samsung's cover screen timeout (**Settings → Cover screen → Clock style**), exactly as it does without FlipFix. **Screen timeout** in the FlipFix app opens that setting directly |
 | **Unfold the phone** | Automatically switches FlipFix's accessibility service off |

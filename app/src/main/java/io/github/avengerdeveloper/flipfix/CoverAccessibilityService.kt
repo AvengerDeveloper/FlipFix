@@ -77,12 +77,59 @@ class CoverAccessibilityService : AccessibilityService() {
      * face then waits behind it, which makes Wallet hide its own.
      */
     private fun updateWalletHandle(reason: String) {
-        val wanted = CoverState.isEnabled(this) && CoverState.walletHandleOn(this) &&
+        val wanted = CoverState.isEnabled(this) && WalletQuickPay.handleWanted(this) &&
             CoverState.appOverLockScreen == null && !shadeOpen && !pickerOpen &&
-            keyguardManager.isKeyguardLocked && CoverState.isCoverOn(displayManager, powerManager) &&
-            WalletQuickPay.isInstalled(this)
+            keyguardManager.isKeyguardLocked && CoverState.isCoverOn(displayManager, powerManager)
         if (wanted) walletHandle.show(reason) else walletHandle.hide(reason)
     }
+
+    /**
+     * Whether Wallet shows its own cover handle (its Quick access > Cover screen switch, kept in Wallet's private
+     * settings) is learned from Samsung's cover home: Wallet shows its handle whenever that home is in front, and
+     * the handle's window raises an event each time it shows. Seen: on. FlipFix swiped away to Samsung's widgets
+     * and no handle there after [WALLET_LOOK_MS]: off. FlipFix's own handles follow (CoverState.walletOnCover).
+     */
+    private fun noteWalletOnCover(on: Boolean, why: String) {
+        if (CoverState.setWalletOnCover(this, on)) {
+            Log.i(CoverState.TAG, "Wallet's own cover handle is ${if (on) "on" else "off"} ($why): FlipFix's follows")
+            updateWalletHandle("Wallet's handle ${if (on) "on" else "off"}")
+        }
+    }
+
+    private val walletRecheck = Runnable { updateWalletHandle("screen on, cover lit") }
+
+    /** When Wallet's own handle last showed on the cover (uptime). */
+    private var walletHandleSeenAt = 0L
+
+    /** The swipe-away (CoverState.dismissedAt) the pending [walletLook] is for. */
+    private var walletLookFor = 0L
+
+    private val walletLook = Runnable {
+        val stillThere = CoverState.dismissed && CoverState.dismissedAt == walletLookFor && !shadeOpen &&
+            !keyguardManager.isKeyguardLocked && CoverState.isCoverOn(displayManager, powerManager)
+        if (stillThere && walletHandleSeenAt < walletLookFor) {
+            Log.d(CoverState.TAG, "no Wallet handle on Samsung's widgets after ${WALLET_LOOK_MS} ms")
+            noteWalletOnCover(false, "Samsung's widgets showed without it")
+        }
+    }
+
+    /**
+     * FlipFix was just swiped away and Samsung's widgets are in front: Wallet shows its handle now if its switch is
+     * on. Looked at once per swipe-away, and only with this service on for a while: Wallet only reports its
+     * windows once it knows an accessibility service is on.
+     */
+    private fun lookForWalletHandle() {
+        val dismissedAt = CoverState.dismissedAt
+        val now = SystemClock.uptimeMillis()
+        if (dismissedAt == walletLookFor || now - dismissedAt > WALLET_LOOK_AFTER_SWIPE_MS ||
+            now - connectedAt < WALLET_LOOK_AFTER_CONNECT_MS || !WalletQuickPay.isAvailable(this)
+        ) return
+        walletLookFor = dismissedAt
+        handler.removeCallbacks(walletLook)
+        handler.postDelayed(walletLook, WALLET_LOOK_MS)
+    }
+
+    private var connectedAt = 0L
 
     private val edge: EdgeReturn = EdgeReturn(this, { CoverState.coverDisplayId(displayManager) }) {
         CoverState.dismissed = false
@@ -104,10 +151,15 @@ class CoverAccessibilityService : AccessibilityService() {
                 Intent.ACTION_SCREEN_ON -> {
                     maybeLaunch("screen on")
                     updateWalletHandle("screen on")
+                    // Woken again right after going off, the cover can read as off for up to ~150 ms after this
+                    // broadcast (Flip8): looked at again once it's lit.
+                    WALLET_RECHECKS_MS.forEach { handler.postDelayed(walletRecheck, it) }
                     scheduleLockScreenCheck()
                 }
                 SHADE_EXPANDED, SHADE_COLLAPSED -> {
                     shadeOpen = intent.action == SHADE_EXPANDED
+                    // Wallet hides its handle for the shade too.
+                    if (shadeOpen) handler.removeCallbacks(walletLook)
                     updateWalletHandle(if (shadeOpen) "shade opened" else "shade closed")
                 }
                 Intent.ACTION_SCREEN_OFF -> {
@@ -116,6 +168,8 @@ class CoverAccessibilityService : AccessibilityService() {
                     shadeOpen = false
                     pickerOpen = false
                     walletHandle.hide("screen off")
+                    handler.removeCallbacks(walletLook)
+                    handler.removeCallbacks(walletRecheck)
                     handler.removeCallbacks(unlockPoll)
                     handler.removeCallbacks(lockScreenCheck)
                     edge.hide()
@@ -153,6 +207,7 @@ class CoverAccessibilityService : AccessibilityService() {
             override fun release(commit: Boolean, onCovered: () -> Unit) = edge.releaseExitDrag(commit, onCovered)
         }
         edge.onExitFinished = { scheduleWidgetsCapture() }
+        connectedAt = SystemClock.uptimeMillis()
         Log.i(CoverState.TAG, "accessibility service connected")
         maybeLaunch("service connected")
         updateWalletHandle("service connected")
@@ -273,9 +328,22 @@ class CoverAccessibilityService : AccessibilityService() {
         // handle report a framework widget class (android.widget.FrameLayout) and sit over Samsung's home.
         val isAppScreen = pkg != SYSTEMUI && !cls.startsWith("android.")
 
+        if (pkg == WalletQuickPay.PACKAGE && !isAppScreen) {
+            // Wallet's own handle, shown over Samsung's cover home.
+            walletHandleSeenAt = SystemClock.uptimeMillis()
+            Log.d(CoverState.TAG, "Wallet's own handle showed ($cls)")
+            handler.removeCallbacks(walletLook)
+            noteWalletOnCover(true, "seen over Samsung's cover home")
+        } else if (!isSubHome) {
+            // Something else came in front of Samsung's widgets: no telling what Wallet would have shown.
+            handler.removeCallbacks(walletLook)
+        }
+
         if (keyguardManager.isKeyguardLocked) {
             Log.d(CoverState.TAG, "locked cover window: $pkg / $cls")
             when {
+                // The always-on display's own window as the cover dozes ("aod.a1" on a Flip8): no app.
+                pkg == AOD_SERVICE && isAppScreen -> Unit
                 // An app over the lock screen (Wallet's sheet, a call, an alarm). Wallet's own handle is a
                 // floating window with a framework class, so it doesn't count.
                 isAppScreen && pkg != null -> {
@@ -312,6 +380,7 @@ class CoverAccessibilityService : AccessibilityService() {
             isSubHome && CoverState.dismissed -> {
                 edge.show()
                 scheduleWidgetsCapture()
+                lookForWalletHandle()
             }
             isSubHome -> maybeLaunch("Samsung cover home shown")
             isAppScreen -> {
@@ -498,6 +567,12 @@ class CoverAccessibilityService : AccessibilityService() {
         const val SHADE_COLLAPSED = "com.android.systemui.subscreen.COLLAPSED"
         /** Samsung's AOD app, which also shows the cover's preset picker. */
         const val AOD_SERVICE = "com.samsung.android.app.aodservice"
+        /** Wallet shows its handle within ~50 ms of Samsung's home coming forward (Flip8, Wallet 6.8.67). */
+        const val WALLET_LOOK_MS = 1_500L
+        /** Samsung's widgets come forward once the swipe-away's card has covered the face. */
+        const val WALLET_LOOK_AFTER_SWIPE_MS = 3_000L
+        const val WALLET_LOOK_AFTER_CONNECT_MS = 1_000L
+        val WALLET_RECHECKS_MS = longArrayOf(300L, 1_000L)
         const val EDGE_REASON = "edge swipe right"
         const val SNAPSHOT_TIMEOUT_MS = 400L
         const val CAPTURE_INTERVAL_MS = 350L

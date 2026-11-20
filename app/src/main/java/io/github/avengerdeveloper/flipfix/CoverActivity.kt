@@ -28,7 +28,8 @@ import kotlin.math.hypot
  * Samsung's video engine to resume, undoing the pause One UI 9 sends on unlock.
  *
  * Gestures: swipe left/right = hide FlipFix until the screen next turns off (reveals Samsung's widgets),
- * swipe up = Samsung Wallet. Samsung's own top-edge pull-down for notifications keeps working.
+ * swipe up (on the Wallet handle along the bottom, or anywhere) = Samsung Wallet's quick-pay sheet, while that
+ * handle shows. Samsung's own top-edge pull-down for notifications keeps working.
  */
 class CoverActivity : Activity() {
 
@@ -65,8 +66,27 @@ class CoverActivity : Activity() {
             }
         }
         gestures = GestureDetector(this, FlingListener())
+        addWalletBar()
         CoverState.coverActivity = WeakReference(this)
         hideNavigationBar()
+    }
+
+    /** Samsung Wallet's handle, as on Samsung's cover home: Wallet hides its own while the face is in front. */
+    private var walletBar: WalletBar? = null
+
+    private fun addWalletBar() {
+        val root = findViewById<android.widget.FrameLayout>(R.id.root)
+        val bar = WalletBar(this, windowManager.currentWindowMetrics.bounds.width()) { openWallet() }
+        // Under the music pill, which keeps the touches on it.
+        root.addView(
+            bar,
+            root.indexOfChild(findViewById(R.id.media)),
+            android.widget.FrameLayout.LayoutParams(bar.barAreaWidth, bar.barAreaHeight).apply {
+                gravity = android.view.Gravity.BOTTOM or android.view.Gravity.START
+                leftMargin = bar.barAreaLeft
+            },
+        )
+        walletBar = bar
     }
 
     /**
@@ -184,6 +204,10 @@ class CoverActivity : Activity() {
         window.decorView.viewTreeObserver.registerFrameCommitCallback { shown = true; CoverState.notifyFaceShown() }
         hideNavigationBar()
         applyCoverTimeout()
+        walletBar?.apply {
+            reset()
+            visibility = if (WalletQuickPay.handleWanted(this@CoverActivity)) View.VISIBLE else View.GONE
+        }
         clock.invalidate()
         clock.reloadStyleAsync()
         // Resumed with the cover off (a face placed behind the lock screen as it went off): no video to resume.
@@ -328,9 +352,15 @@ class CoverActivity : Activity() {
         }
     }
 
-    /** The quick-pay sheet, as Samsung's handle on the locked cover opens it (WalletQuickPay). */
-    private fun openWallet() {
-        WalletQuickPay.open(this, display?.displayId ?: return, "face swiped up")
+    /**
+     * The quick-pay sheet, as Samsung's handle opens it (WalletQuickPay), from the face's Wallet handle or a swipe
+     * up anywhere on the face. Only while the handle shows (Wallet there and its cover handle on).
+     */
+    private fun openWallet(): Boolean {
+        if (walletBar?.visibility != View.VISIBLE) return false
+        walletBar?.playOpened()
+        WalletQuickPay.open(this, display?.displayId ?: return false, "face swiped up")
+        return true
     }
 
     private inner class FlingListener : GestureDetector.SimpleOnGestureListener() {
@@ -343,7 +373,7 @@ class CoverActivity : Activity() {
             val minDistance = resources.displayMetrics.density * MIN_SWIPE_DP
             return when {
                 abs(dx) > abs(dy) && abs(dx) > minDistance -> { flingHandled = true; dismiss(); true }
-                dy < 0 && abs(dy) > abs(dx) && abs(dy) > minDistance -> { flingHandled = true; openWallet(); true }
+                dy < 0 && abs(dy) > abs(dx) && abs(dy) > minDistance && openWallet() -> { flingHandled = true; true }
                 else -> false
             }
         }

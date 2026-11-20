@@ -49,6 +49,7 @@ class MainActivity : Activity() {
     private lateinit var helperRow: Row
     private lateinit var bankRow: Row
     private lateinit var forgetRow: Row
+    private var walletRow: Row? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -111,15 +112,14 @@ class MainActivity : Activity() {
             .trailing(chevron())
             .onClick { addTile() }
         val coverRows = mutableListOf(helperRow, timeoutRow, tileRow)
-        if (WalletQuickPay.isInstalled(this)) {
+        // Only with Samsung Wallet installed and not disabled.
+        if (WalletQuickPay.isAvailable(this)) {
             val walletSwitch = Switch(this).apply {
                 isChecked = CoverState.walletHandleOn(this@MainActivity)
                 setOnCheckedChangeListener { _, checked -> CoverState.setWalletHandleOn(this@MainActivity, checked) }
             }
-            coverRows += Row(
-                "Wallet handle when locked",
-                "Samsung hides its swipe-up Wallet handle while FlipFix is on. FlipFix shows its own in the same place.",
-            ).trailing(walletSwitch).onClick { walletSwitch.toggle() }
+            walletRow = Row("Wallet handle", "").trailing(walletSwitch).onClick { walletSwitch.toggle() }
+            coverRows += walletRow!!
         }
         page.addView(card(*coverRows.toTypedArray()))
 
@@ -208,7 +208,15 @@ class MainActivity : Activity() {
             if (AccessibilityToggle.isEnabled(this)) "On now"
             else "Off now · turns on by itself when you fold the phone",
         )
-
+        // Wallet's own switch can't be read (it's private to Wallet): this is what FlipFix last saw of its handle.
+        walletRow?.summary(
+            if (CoverState.walletOnCover(this)) {
+                "Samsung hides its swipe-up Wallet handle behind FlipFix. FlipFix shows its own in the same place."
+            } else {
+                "Hidden: Samsung Wallet's own cover handle was off when FlipFix last saw Samsung's widgets " +
+                    "(Wallet > Quick access > Cover screen)."
+            },
+        )
 
         val paused = BankGuard.pausedApps(this).map { BankGuard.label(this, it) }.sorted()
         bankRow.summary(

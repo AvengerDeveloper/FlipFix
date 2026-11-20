@@ -22,6 +22,14 @@ object CoverState {
 
     /** Set when the user swipes FlipFix away to reach Samsung's widgets; cleared when the screen turns off. */
     @Volatile var dismissed = false
+        set(value) {
+            if (value && !field) dismissedAt = android.os.SystemClock.uptimeMillis()
+            field = value
+        }
+
+    /** When FlipFix was last swiped away (uptime). */
+    @Volatile var dismissedAt = 0L
+        private set
 
     /**
      * Package of a banking app FlipFix paused itself for (see BankGuard). While set, the fold rule keeps
@@ -204,6 +212,21 @@ object CoverState {
     }
 
     /**
+     * Wallet's own cover handle, as FlipFix last saw it: Wallet's switch for it (Wallet > Quick access > Cover
+     * screen) is kept in Wallet's private settings, so FlipFix learns it by watching Samsung's cover home
+     * (CoverAccessibilityService.noteWalletOnCover). On until seen otherwise, like Wallet's own default.
+     */
+    fun walletOnCover(context: Context): Boolean =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_WALLET_ON_COVER, true)
+
+    /** Returns whether this changed what FlipFix knew. */
+    fun setWalletOnCover(context: Context, on: Boolean): Boolean {
+        if (walletOnCover(context) == on) return false
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_WALLET_ON_COVER, on).apply()
+        return true
+    }
+
+    /**
      * The cover screen: the other built-in display. On Flip 5/6 it is display 1, named "Built-in Screen"
      * like the main one. Note Samsung flags it FLAG_PRESENTATION, so that flag must NOT be used to skip
      * displays. Virtual displays (casting, screen recording, DeX) have other names.
@@ -238,4 +261,5 @@ object CoverState {
     private const val PREFS = "flipfix"
     private const val KEY_ENABLED = "enabled"
     private const val KEY_WALLET_HANDLE = "wallet_handle"
+    private const val KEY_WALLET_ON_COVER = "wallet_on_cover"
 }
