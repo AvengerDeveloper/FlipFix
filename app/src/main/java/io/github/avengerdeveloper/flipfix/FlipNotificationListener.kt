@@ -38,6 +38,10 @@ class FlipNotificationListener : NotificationListenerService() {
     private val handler = Handler(Looper.getMainLooper())
     private var lastSnapshot = ""
 
+    /** The cover as last seen, and when it last went off (uptime): tells whether the phone opened from it. */
+    private var wasCoverOn = false
+    private var coverOffAt = 0L
+
     private val displayListener = object : DisplayManager.DisplayListener {
         override fun onDisplayAdded(displayId: Int) = onDisplayEvent("display $displayId added")
         override fun onDisplayRemoved(displayId: Int) = onDisplayEvent("display $displayId removed")
@@ -218,12 +222,22 @@ class FlipNotificationListener : NotificationListenerService() {
             lastSnapshot = snapshot
             Log.d(CoverState.TAG, "fold rule ($reason): $snapshot")
         }
+        if (wasCoverOn && !coverOn) coverOffAt = SystemClock.uptimeMillis()
+        wasCoverOn = coverOn
         if (coverOn && iconsStale) publishIcons()
         when {
             !CoverState.isEnabled(this) -> AccessibilityToggle.set(this, false, "FlipFix switched off")
             mainOn -> {
                 CoverState.suspendedFor = null
                 CoverState.dismissed = false
+                // Opened with the cover lit, Samsung moves the cover's top task (the face, placed behind the
+                // lock screen) to the main screen, where the unlock would show it. Closed now; the next cover
+                // wake places a fresh one. Opened with the cover off, the face stays on the cover, ready.
+                val coverJustOff = SystemClock.uptimeMillis() - coverOffAt < COVER_LIT_BEFORE_OPEN_MS
+                if (coverJustOff && CoverState.coverActivity?.get() != null) {
+                    Log.d(CoverState.TAG, "phone opened with the cover lit: face closed")
+                    CoverState.finishCover()
+                }
                 AccessibilityToggle.set(this, false, "main screen on ($reason)")
             }
             CoverState.suspendedFor != null -> AccessibilityToggle.set(this, false, "paused for ${CoverState.suspendedFor}")
@@ -244,6 +258,8 @@ class FlipNotificationListener : NotificationListenerService() {
 
     private companion object {
         const val RECHECK_MS = 400L
+        /** Opening the phone turns the cover off about 60 ms before the main screen comes on (Flip8). */
+        const val COVER_LIT_BEFORE_OPEN_MS = 2_000L
         const val ICONS_COALESCE_MS = 100L
     }
 }

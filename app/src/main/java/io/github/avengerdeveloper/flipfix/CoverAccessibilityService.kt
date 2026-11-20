@@ -45,6 +45,7 @@ class CoverAccessibilityService : AccessibilityService() {
         override fun run() {
             if (!keyguardManager.isKeyguardLocked) {
                 noteUnlock()
+                walletHandle.hide("unlocked")
                 maybeLaunch("unlock detected")
             } else if (SystemClock.uptimeMillis() < unlockPollDeadline) {
                 handler.postDelayed(this, UNLOCK_POLL_MS)
@@ -53,6 +54,36 @@ class CoverAccessibilityService : AccessibilityService() {
     }
 
     private var lastLaunchAt = 0L
+
+    private val walletHandle: WalletHandle = WalletHandle(this, { CoverState.coverDisplayId(displayManager) }) {
+        // Counted as over the lock screen at once: a lock-screen check finishing a moment later would
+        // otherwise replace the face, which goes in front of the sheet and closes it (seen on a Flip8).
+        CoverState.appOverLockScreen = WalletQuickPay.PACKAGE
+        walletHandle.hide("swiped up")
+        WalletQuickPay.open(this, CoverState.coverDisplayId(displayManager), "lock-screen handle")
+    }
+
+    /**
+     * The cover's notification shade is pulled down. SystemUI announces it (SHADE_EXPANDED, SHADE_COLLAPSED), and
+     * Wallet hides its own handle on the same broadcasts; the shade raises no window event.
+     */
+    private var shadeOpen = false
+
+    /** Samsung's preset picker is open over the lock screen (from a long press). */
+    private var pickerOpen = false
+
+    /**
+     * FlipFix's Wallet handle (WalletHandle) shows while Samsung's lock screen is in front on the lit cover: the
+     * face then waits behind it, which makes Wallet hide its own.
+     */
+    private fun updateWalletHandle(reason: String) {
+        val wanted = CoverState.isEnabled(this) && CoverState.walletHandleOn(this) &&
+            CoverState.appOverLockScreen == null && !shadeOpen && !pickerOpen &&
+            keyguardManager.isKeyguardLocked && CoverState.isCoverOn(displayManager, powerManager) &&
+            WalletQuickPay.isInstalled(this)
+        if (wanted) walletHandle.show(reason) else walletHandle.hide(reason)
+    }
+
     private val edge: EdgeReturn = EdgeReturn(this, { CoverState.coverDisplayId(displayManager) }) {
         CoverState.dismissed = false
         // The full-screen card stays until FlipFix has drawn underneath it (or a timeout), then fades.
@@ -66,14 +97,25 @@ class CoverAccessibilityService : AccessibilityService() {
                 Intent.ACTION_USER_PRESENT -> {
                     noteUnlock()
                     CoverState.dismissed = false
+                    CoverState.appOverLockScreen = null
+                    walletHandle.hide("unlocked")
                     maybeLaunch("unlocked")
                 }
                 Intent.ACTION_SCREEN_ON -> {
                     maybeLaunch("screen on")
+                    updateWalletHandle("screen on")
                     scheduleLockScreenCheck()
+                }
+                SHADE_EXPANDED, SHADE_COLLAPSED -> {
+                    shadeOpen = intent.action == SHADE_EXPANDED
+                    updateWalletHandle(if (shadeOpen) "shade opened" else "shade closed")
                 }
                 Intent.ACTION_SCREEN_OFF -> {
                     CoverState.dismissed = false
+                    CoverState.appOverLockScreen = null
+                    shadeOpen = false
+                    pickerOpen = false
+                    walletHandle.hide("screen off")
                     handler.removeCallbacks(unlockPoll)
                     handler.removeCallbacks(lockScreenCheck)
                     edge.hide()
@@ -94,8 +136,11 @@ class CoverAccessibilityService : AccessibilityService() {
             addAction(Intent.ACTION_USER_PRESENT)
             addAction(Intent.ACTION_SCREEN_ON)
             addAction(Intent.ACTION_SCREEN_OFF)
+            addAction(SHADE_EXPANDED)
+            addAction(SHADE_COLLAPSED)
         }
-        // These are protected system broadcasts; EXPORTED is required for them to be delivered reliably.
+        // These are system broadcasts (SystemUI's shade ones unprotected); EXPORTED is required for them to be
+        // delivered reliably.
         registerReceiver(receiver, filter, RECEIVER_EXPORTED)
         CoverState.exitAnimator = { onCovered ->
             val face = edge.freshFace()
@@ -110,6 +155,7 @@ class CoverAccessibilityService : AccessibilityService() {
         edge.onExitFinished = { scheduleWidgetsCapture() }
         Log.i(CoverState.TAG, "accessibility service connected")
         maybeLaunch("service connected")
+        updateWalletHandle("service connected")
         // The service is switched on as the cover lights up, often after SCREEN_ON was sent.
         scheduleLockScreenCheck()
         // A preset picked from the cover's long-press menu leaves the screen on: watch the switch itself.
@@ -179,6 +225,11 @@ class CoverAccessibilityService : AccessibilityService() {
         if (!keyguardManager.isKeyguardLocked || CoverState.showing ||
             !CoverState.isCoverOn(displayManager, powerManager) || !CoverFaceMatcher.needsCheck(this)
         ) return
+        CoverState.appOverLockScreen?.let {
+            // The snapshot would show that app; looked at again once the lock screen is back (lockScreenBack).
+            Log.d(CoverState.TAG, "lock screen not checked: $it is over it")
+            return
+        }
         val stamp = CoverFaceMatcher.presetStamp(this)
         val newTry = lockChecksThisWake == 0
         val recheckIn = LOCK_SCREEN_RECHECK_DELAYS_MS.getOrNull(lockChecksThisWake)
@@ -222,6 +273,32 @@ class CoverAccessibilityService : AccessibilityService() {
         // handle report a framework widget class (android.widget.FrameLayout) and sit over Samsung's home.
         val isAppScreen = pkg != SYSTEMUI && !cls.startsWith("android.")
 
+        if (keyguardManager.isKeyguardLocked) {
+            Log.d(CoverState.TAG, "locked cover window: $pkg / $cls")
+            when {
+                // An app over the lock screen (Wallet's sheet, a call, an alarm). Wallet's own handle is a
+                // floating window with a framework class, so it doesn't count.
+                isAppScreen && pkg != null -> {
+                    if (CoverState.appOverLockScreen != pkg) Log.d(CoverState.TAG, "$pkg is open over the lock screen")
+                    CoverState.appOverLockScreen = pkg
+                    walletHandle.hide("$pkg opened")
+                }
+                // Samsung's preset picker (long press): a window over the lock screen, no app.
+                pkg == AOD_SERVICE -> {
+                    pickerOpen = true
+                    walletHandle.hide("preset picker opened")
+                }
+                // Samsung's lock screen in front again (its cover presentation): what was over it has closed.
+                pkg == SYSTEMUI && !isSubHome -> {
+                    if (pickerOpen) {
+                        pickerOpen = false
+                        updateWalletHandle("preset picker closed")
+                    }
+                    if (CoverState.appOverLockScreen != null) lockScreenBack()
+                }
+            }
+        }
+
         when {
             // Samsung's widget pager does not report which page is showing (checked on One UI 9), so a
             // left-edge strip is how "swipe right to go back to FlipFix" is detected.
@@ -229,6 +306,7 @@ class CoverAccessibilityService : AccessibilityService() {
                 // Samsung shows its cover home a moment before the keyguard finishes going away.
                 // A new unlock always starts fresh, whatever happened before.
                 CoverState.dismissed = false
+                walletHandle.hide("unlocking")
                 startUnlockPoll()
             }
             isSubHome && CoverState.dismissed -> {
@@ -247,6 +325,23 @@ class CoverAccessibilityService : AccessibilityService() {
         }
     }
 
+
+    /**
+     * The app that was over the lock screen has closed: catch up on what waited for it. The Wallet handle comes
+     * back, a face whose clock changed meanwhile is replaced, and the lock screen is looked at if still needed.
+     */
+    private fun lockScreenBack() {
+        val app = CoverState.appOverLockScreen
+        CoverState.appOverLockScreen = null
+        updateWalletHandle("$app closed")
+        val face = CoverState.coverActivity?.get() as? CoverActivity
+        if (face == null) {
+            CoverState.placeFace(this, CoverState.coverDisplayId(displayManager), "$app closed")
+        } else if (CoverState.faceOutdated && face.shown) {
+            face.replace("its clock changed while $app was open")
+        }
+        scheduleLockScreenCheck()
+    }
 
     /**
      * Swipe-away without a fresh snapshot: screenshot the cover and play the card exit with it.
@@ -317,6 +412,7 @@ class CoverAccessibilityService : AccessibilityService() {
         CoverState.exitAnimator = null
         CoverState.exitDrag = null
         edge.hide()
+        walletHandle.hide("service destroyed")
         runCatching { unregisterReceiver(receiver) }
         Log.i(CoverState.TAG, "accessibility service destroyed")
         super.onDestroy()
@@ -397,6 +493,11 @@ class CoverAccessibilityService : AccessibilityService() {
 
     private companion object {
         const val SYSTEMUI = "com.android.systemui"
+        /** SystemUI's broadcasts as the cover's notification shade opens and closes (One UI 9). */
+        const val SHADE_EXPANDED = "com.android.systemui.subscreen.EXPANDED"
+        const val SHADE_COLLAPSED = "com.android.systemui.subscreen.COLLAPSED"
+        /** Samsung's AOD app, which also shows the cover's preset picker. */
+        const val AOD_SERVICE = "com.samsung.android.app.aodservice"
         const val EDGE_REASON = "edge swipe right"
         const val SNAPSHOT_TIMEOUT_MS = 400L
         const val CAPTURE_INTERVAL_MS = 350L

@@ -110,7 +110,18 @@ class MainActivity : Activity() {
         val tileRow = Row("Quick Settings tile", "Turn FlipFix on or off from Quick Settings")
             .trailing(chevron())
             .onClick { addTile() }
-        page.addView(card(helperRow, timeoutRow, tileRow))
+        val coverRows = mutableListOf(helperRow, timeoutRow, tileRow)
+        if (WalletQuickPay.isInstalled(this)) {
+            val walletSwitch = Switch(this).apply {
+                isChecked = CoverState.walletHandleOn(this@MainActivity)
+                setOnCheckedChangeListener { _, checked -> CoverState.setWalletHandleOn(this@MainActivity, checked) }
+            }
+            coverRows += Row(
+                "Wallet handle when locked",
+                "Samsung hides its swipe-up Wallet handle while FlipFix is on. FlipFix shows its own in the same place.",
+            ).trailing(walletSwitch).onClick { walletSwitch.toggle() }
+        }
+        page.addView(card(*coverRows.toTypedArray()))
 
         // Banking apps.
         page.addView(header("Banking apps"))

@@ -10,6 +10,7 @@ import android.graphics.drawable.Icon
 import java.lang.ref.WeakReference
 import java.util.concurrent.CopyOnWriteArraySet
 import android.hardware.display.DisplayManager
+import android.media.AudioManager
 import android.media.session.MediaSession
 import android.os.PowerManager
 import android.view.Display
@@ -100,6 +101,13 @@ object CoverState {
         actions.forEach { it() }
     }
 
+    /**
+     * An app open over the locked cover (Wallet's quick-pay sheet, a call, an alarm), as the accessibility
+     * service last saw it; null while Samsung's lock screen itself is in front. A face started meanwhile would
+     * go in front of that app, so none is placed or replaced until it closes.
+     */
+    @Volatile var appOverLockScreen: String? = null
+
     /** The live cover face, if any (it stays alive in the background between uses). */
     @Volatile var coverActivity: WeakReference<Activity>? = null
 
@@ -117,6 +125,11 @@ object CoverState {
      * the unlock shows it as soon as it has drawn, with the clock as it is then.
      */
     fun placeFace(context: Context, displayId: Int, reason: String) {
+        val inFront = appOverLockScreen ?: if (callOn(context)) "a call" else null
+        if (inFront != null) {
+            Log.d(TAG, "face not placed ($reason): $inFront is in front")
+            return
+        }
         val intent = Intent(context, CoverActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         try {
             context.startActivity(intent, ActivityOptions.makeBasic().setLaunchDisplayId(displayId).toBundle())
@@ -125,6 +138,13 @@ object CoverState {
             Log.w(TAG, "couldn't place the face behind the lock screen ($reason)", t)
         }
     }
+
+    /**
+     * A call ringing or under way (phone or internet call), when the call screen may be over the lock screen
+     * before FlipFix has seen its window. Read from the audio mode, which needs no permission.
+     */
+    private fun callOn(context: Context): Boolean = context.getSystemService(AudioManager::class.java)?.mode in
+        setOf(AudioManager.MODE_RINGTONE, AudioManager.MODE_IN_CALL, AudioManager.MODE_IN_COMMUNICATION)
 
     /**
      * On a launch of the face: Android shows its screenshot of a hidden face first only for a launch like
@@ -175,6 +195,14 @@ object CoverState {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_ENABLED, enabled).apply()
     }
 
+    /** FlipFix's Wallet handle on the locked cover (WalletHandle). On unless switched off in FlipFix. */
+    fun walletHandleOn(context: Context): Boolean =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_WALLET_HANDLE, true)
+
+    fun setWalletHandleOn(context: Context, on: Boolean) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_WALLET_HANDLE, on).apply()
+    }
+
     /**
      * The cover screen: the other built-in display. On Flip 5/6 it is display 1, named "Built-in Screen"
      * like the main one. Note Samsung flags it FLAG_PRESENTATION, so that flag must NOT be used to skip
@@ -209,4 +237,5 @@ object CoverState {
     private const val FALLBACK_COVER_DISPLAY_ID = 1
     private const val PREFS = "flipfix"
     private const val KEY_ENABLED = "enabled"
+    private const val KEY_WALLET_HANDLE = "wallet_handle"
 }

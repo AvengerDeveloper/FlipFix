@@ -5,6 +5,7 @@ import android.app.ActivityOptions
 import android.app.KeyguardManager
 import android.app.WallpaperManager
 import android.content.Intent
+import android.content.res.Configuration
 import android.hardware.display.DisplayManager
 import android.os.PowerManager
 import android.os.Bundle
@@ -51,7 +52,13 @@ class CoverActivity : Activity() {
                 val alreadyOutdated = CoverState.faceOutdated
                 CoverState.faceOutdated = true
                 if (getSystemService(KeyguardManager::class.java)?.isKeyguardLocked == true && CoverState.isEnabled(this)) {
-                    if (shown) replace("its clock changed")
+                    val inFront = CoverState.appOverLockScreen
+                    if (shown && inFront != null) {
+                        // A fresh face would go in front of that app: replaced once it closes (lockScreenBack).
+                        Log.d(CoverState.TAG, "cover clock changed while $inFront is over the lock screen")
+                    } else if (shown) {
+                        replace("its clock changed")
+                    }
                 } else if (!alreadyOutdated) {
                     Log.d(CoverState.TAG, "cover clock changed while hidden: next launch skips the old screenshot")
                 }
@@ -127,11 +134,36 @@ class CoverActivity : Activity() {
         }
     }
 
+    /**
+     * The face is only meant for the cover. Opening the phone with the cover lit moves the cover's top task,
+     * the face, to the main screen. Seen on a Flip8 (One UI 9): it resumed there at the unlock while its
+     * display still read as the cover's, and swiping up on it opened Wallet. So the screens' state counts
+     * too: the main screen on with the cover off.
+     */
+    private fun onMainScreen(): Boolean {
+        if (display?.displayId == Display.DEFAULT_DISPLAY) return true
+        val displays = getSystemService(DisplayManager::class.java)
+        return CoverState.isMainOn(displays) && !CoverState.isCoverOn(displays, getSystemService(PowerManager::class.java))
+    }
+
+    private fun closeOnMainScreen(reason: String) {
+        Log.d(CoverState.TAG, "face on the main screen ($reason): closed")
+        finishAndRemoveTask()
+    }
+
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        if (!isFinishing && display?.displayId == Display.DEFAULT_DISPLAY) closeOnMainScreen("moved there")
+    }
+
     override fun onResume() {
         super.onResume()
-        if (display?.displayId == Display.DEFAULT_DISPLAY || !CoverState.isEnabled(this)) {
-            // Moved to the main screen when the phone was opened, or FlipFix was switched off.
+        if (!CoverState.isEnabled(this)) {
             finish()
+            return
+        }
+        if (onMainScreen()) {
+            closeOnMainScreen("resumed")
             return
         }
         if (CoverState.notificationJustOpened()) {
@@ -296,18 +328,9 @@ class CoverActivity : Activity() {
         }
     }
 
+    /** The quick-pay sheet, as Samsung's handle on the locked cover opens it (WalletQuickPay). */
     private fun openWallet() {
-        val launch = packageManager.getLaunchIntentForPackage(WALLET) ?: run {
-            Log.w(CoverState.TAG, "Samsung Wallet not installed")
-            return
-        }
-        val options = ActivityOptions.makeBasic().setLaunchDisplayId(display?.displayId ?: return)
-        try {
-            startActivity(launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), options.toBundle())
-            Log.i(CoverState.TAG, "opened Wallet on display ${display?.displayId}")
-        } catch (t: Throwable) {
-            Log.w(CoverState.TAG, "could not open Wallet on cover", t)
-        }
+        WalletQuickPay.open(this, display?.displayId ?: return, "face swiped up")
     }
 
     private inner class FlingListener : GestureDetector.SimpleOnGestureListener() {
@@ -328,7 +351,6 @@ class CoverActivity : Activity() {
 
     private companion object {
         const val CMD_RESUME = "samsung.android.wallpaper.resume"
-        const val WALLET = "com.samsung.android.spay"
         const val MIN_SWIPE_DP = 48
         const val EXIT_COMMIT_PROGRESS = 0.33f
         const val EXIT_FLICK_DP_PER_MS = 0.4f
