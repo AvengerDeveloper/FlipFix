@@ -1,6 +1,6 @@
 # FlipFix disclaimer
 
-> **FlipFix is experimental test software.** It is new, it was built and tested by one developer on one phone, and it depends on undocumented Samsung behaviour that any update can change. Expect bugs. Install it only if you are comfortable with that, and use it entirely at your own risk.
+> **FlipFix is experimental test software.** It is new, it was built and tested by one developer on two phones, and it depends on undocumented Samsung behaviour that any update can change. Expect bugs. Install it only if you are comfortable with that, and use it entirely at your own risk.
 
 ## Use at your own risk
 
@@ -19,7 +19,8 @@ FlipFix was built and tested over a few days in November 2026. Testing so far:
 | What | Covered |
 | :--- | :--- |
 | **Phones** | One Galaxy Z Flip8 (`SM-F776B`) on One UI 9.0 / Android 17 as the test phone. A Galaxy Z Flip6 (`SM-F741B`, One UI 9.0) was used during early development. |
-| **Cover styles** | The nine cover presets in the test phone's cover-screen list, all filmed on 20 November; the two that drew their clock wrongly then were fixed on 22 November. Of the 15 presets saved on that phone, FlipFix can draw the clock of 9; the others show no clock. |
+| **Cover styles** | The nine cover presets in the test phone's cover-screen list, all filmed on 20 November; the two that drew their clock wrongly then were fixed on 22 November. All nine are drawn from their own templates. |
+| **Fallback clock** | Tested only on the Z Flip6, with every preset's template left out on purpose: it found the time on 9 of the 11 presets (one date came out as just the month) and showed no clock on the other two (a heavy stencil-style clock and a thin, light one). It hasn't been needed, or tested, on the Z Flip8. |
 | **How** | By the developer, by hand: screenshots of Samsung's locked cover compared pixel by pixel with FlipFix's screen after unlocking, filmed unlocks, and the phone's own logs. There are no automated tests. |
 | **Settings** | English, 24-hour clock, dark mode, fingerprint unlock, the phone folded. |
 | **Widgets** | A few widget layouts with the widgets in left-aligned rows. |
@@ -28,7 +29,7 @@ FlipFix was built and tested over a few days in November 2026. Testing so far:
 ## Known limitations
 
 * **Widgets** under the clock are blurred, non-working placeholders. The real widgets are a swipe away.
-* **Clock styles FlipFix can't draw** show no clock, rather than a wrong one. This includes analog dials with shaped or illustrated hands, and presets restored from another phone's backup.
+* **Clock styles FlipFix doesn't recognise** get a plain fallback clock in the same spot, in a standard font rather than Samsung's, and its date can come out shorter. When FlipFix can't clearly find the time, as with analog dials with shaped or illustrated hands, it shows no clock rather than a wrong one. Presets restored from another phone's backup are treated the same way; making the preset again on this phone brings back the exact clock.
 * **After switching cover presets**, FlipFix needs one look at the locked cover to recognise the new one. Until then it may show no clock or the previous one.
 * **No weather** on the stacked clock: FlipFix has no internet access.
 * **Small mismatches**: a clock or date can be a few pixels or a shade off from Samsung's.
