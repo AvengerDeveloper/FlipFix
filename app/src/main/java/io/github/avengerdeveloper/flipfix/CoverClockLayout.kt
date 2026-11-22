@@ -381,9 +381,10 @@ sealed interface CoverClockLayout {
             val bands = t.bands(from = (h * 0.10f).toInt(), mergeGap = (h * 0.02f).toInt())
             val key = "${file.path}@${file.lastModified()}"
             val layouts = when {
-                // A one-line clock is a thin band; a band filling the template is an illustrated face.
-                bands.size == 1 && bands[0].height < h * 0.2f ->
-                    listOfNotNull(CoverClockStyle.fromBand(t, bands[0])?.let { Horizontal(it) })
+                // A one-line clock is a thin band; a band filling the template is an illustrated face. A big
+                // date a few pixels over the time also makes one thin band here: split finer, it is two lines.
+                bands.size == 1 && bands[0].height < h * 0.2f -> oneLine(context, t, key)
+                    .ifEmpty { listOfNotNull(CoverClockStyle.fromBand(t, bands[0])?.let { Horizontal(it) }) }
                 bands.size == 2 && bands[1].height > bands[0].height * 1.8f ->
                     stacked(context, t, bands[0], bands[1], key)
                 else -> twoLine(context, t, key)
