@@ -19,7 +19,7 @@ FlipFix was built and tested over a few days in November 2026. Testing so far:
 | What | Covered |
 | :--- | :--- |
 | **Phones** | One Galaxy Z Flip8 (`SM-F776B`) on One UI 9.0 / Android 17 as the test phone. A Galaxy Z Flip6 (`SM-F741B`, One UI 9.0) was used during early development. |
-| **Cover styles** | The six cover presets on the test phone. Of the 15 presets saved on that phone, FlipFix can draw the clock of 9; the others show no clock. |
+| **Cover styles** | The nine cover presets in the test phone's cover-screen list, all filmed on 20 November; the two that drew their clock wrongly then were fixed on 22 November. Of the 15 presets saved on that phone, FlipFix can draw the clock of 9; the others show no clock. |
 | **How** | By the developer, by hand: screenshots of Samsung's locked cover compared pixel by pixel with FlipFix's screen after unlocking, filmed unlocks, and the phone's own logs. There are no automated tests. |
 | **Settings** | English, 24-hour clock, dark mode, fingerprint unlock, the phone folded. |
 | **Widgets** | A few widget layouts with the widgets in left-aligned rows. |
@@ -51,7 +51,7 @@ Everything not listed under "How FlipFix was tested" is untested. In particular:
 
 ## Battery use
 
-On the test phone, over one day of normal use (17-18 November 2026, about 18 minutes with the cover screen on), Android's battery statistics put FlipFix at **3.84 mAh of the 2,685 mAh** the phone used: about **0.14%**, with about 52 seconds of processor time and no network use.
+On the test phone, over one day of normal use (17-18 November 2026, about 18 minutes with the cover screen on), Android's battery statistics put FlipFix at **3.84 mAh of the 2,685 mAh** the phone used: about **0.14%**, with about 52 seconds of processor time and no network use. A day with FlipFix's accessibility service off (19 November) showed no measurable difference in the phone's drain with the screen off (about 91 mAh an hour without FlipFix, 88 with it); screen-on use differed too much between the two days to compare.
 
 Keep in mind:
 

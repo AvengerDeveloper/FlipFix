@@ -2,8 +2,9 @@
 <!--
   Only window-state changes, no window content: FlipFix never reads what is on screen.
   Gestures: taps that land on FlipFix's edge strip are replayed to Samsung's widgets underneath.
-  Screenshot: only of the cover screen, only of FlipFix's own face at the moment it is swiped away, kept in
-  memory for the slide-away / slide-back animation. Never saved or sent anywhere.
+  Screenshots: only of the cover screen, kept in memory and never saved or sent anywhere. FlipFix's own face
+  as it is swiped away (the slide-away / slide-back animation); Samsung's locked cover after a preset switch
+  (compared with each preset's clock, then dropped); Samsung's widgets under the clock (blurred placeholders).
   The service exists so FlipFix may open its cover face from the background after unlock.
 -->
 <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"

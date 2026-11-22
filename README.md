@@ -123,13 +123,15 @@ Full technical details and reverse-engineering notes are documented in [`researc
 
 FlipFix is built to stay out of the way and keep everything strictly on-device.
 
-### Permissions FlipFix Uses (3 Total)
+### Permissions FlipFix Uses
 
 | Permission / Capability | Why It's Needed & Privacy Guardrails |
 | :--- | :--- |
-| **Accessibility Service**<br>(`BIND_ACCESSIBILITY_SERVICE`) | Android only allows an app to open a window on the cover screen from the background through a few privileged mechanisms. FlipFix listens *only* for top-window state changes and **never** reads screen text or UI structure (`canRetrieveWindowContent` is turned off in its XML configuration). Snapshots used for the swipe-to-widgets card animation, plus a few snapshots of Samsung's locked cover after you switch cover presets (to tell which preset is active; it can show notification previews, so it is compared and dropped within a fraction of a second), stay strictly in RAM, are never written to storage, and are released when the screen turns off. The one exception: if your cover style has widgets under the clock, a heavily blurred copy of each widget's text and icons (too blurry to read) is kept in RAM to draw its placeholder. It is never written to storage either, and after a restart it is rebuilt from one new snapshot of the locked cover. |
+| **Accessibility Service**<br>(`BIND_ACCESSIBILITY_SERVICE`) | Android only allows an app to open a window on the cover screen from the background through a few privileged mechanisms. FlipFix listens *only* for top-window state changes and **never** reads screen text or UI structure (`canRetrieveWindowContent` is turned off in its XML configuration). The one input it sends: a tap that lands on FlipFix's thin edge strip over Samsung's widgets is passed on to the widgets underneath (`canPerformGestures`). Snapshots used for the swipe-to-widgets card animation, plus a few snapshots of Samsung's locked cover after you switch cover presets (to tell which preset is active; it can show notification previews, so it is compared and dropped within a fraction of a second), stay strictly in RAM, are never written to storage, and are released when the screen turns off. The one exception: if your cover style has widgets under the clock, a heavily blurred copy of each widget's text and icons (too blurry to read) is kept in RAM to draw its placeholder. It is never written to storage either, and after a restart it is rebuilt from one new snapshot of the locked cover. |
 | **Write Secure Settings**<br>(`WRITE_SECURE_SETTINGS`) | Lets FlipFix turn its own Accessibility Service on only while the cover screen is active, and turn it off the instant you unfold the phone or open an excluded app. |
 | **Notification Access**<br>(`BIND_NOTIFICATION_LISTENER_SERVICE`) | Reads active notifications locally on-device solely to render the top-left notification icons and the Now bar music player pill (album artwork, track title, and playback controls). |
+| **Notifications**<br>(`POST_NOTIFICATIONS`, asked when you open the app) | Only for the one-time "Pause FlipFix for this banking app?" question and the notice that FlipFix is paused. |
+| **Your list of apps**<br>(launcher apps, plus Samsung's AOD, font and Wallet packages) | To list your apps under **Choose banking apps…**, to load the small icons of apps whose notifications it shows, and to load Samsung's clock fonts and digit shapes from the phone. Nothing about your apps leaves the phone. |
 
 ### Permissions FlipFix Does Not Use
 
