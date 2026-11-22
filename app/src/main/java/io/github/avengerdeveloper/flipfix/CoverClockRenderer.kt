@@ -305,10 +305,7 @@ class CoverClockRenderer(private val context: Context) {
         val fade = LinearGradient(0f, bottom - height, 0f, bottom, faded, opaque, Shader.TileMode.CLAMP)
         digitStrokePaint.shader = fade
         dotPaint.shader = fade
-        digits.draw(
-            canvas, sample, text, left, bottom, height, digitStrokePaint, dotPaint, thickness,
-            shade = opaque, shadeTopAlpha = topAlpha,
-        )
+        digits.draw(canvas, sample, text, left, bottom, height, digitStrokePaint, dotPaint, thickness, shaded = true)
     }
 
     private fun drawHorizontal(
