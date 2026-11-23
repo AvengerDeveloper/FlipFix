@@ -31,26 +31,18 @@ Samsung's One UI 9 update changed the cover screen on the Galaxy Z Flip. Now, th
 * **Private:** Nothing is sent, and no snapshot or notification is ever saved: FlipFix remembers only its settings, your banking-app choices and where each clock sits. FlipFix looks at your notifications only to show their icons and your music player, and the quick snapshots it takes of the cover screen (for the swipe animations and to recognise your cover style) stay in memory and are thrown away. The one thing kept is a heavily blurred copy of the text and icons of any widgets under your clock, too blurry to read, in memory only, to draw their placeholders.
 * **Banking-friendly:** Because FlipFix turns itself off the moment you unfold your phone, banking apps work normally without complaining.
 
-### How to install (takes ~3 minutes)
+### How to install (about 5 minutes)
 Because Android blocks normal apps from changing how the cover screen behaves, you need to plug your phone into a computer **once** to give FlipFix permission. After that, you never need the computer again.
 
-1. **Get your phone ready:**
-   * Open **Settings → Security and privacy → Auto Blocker** and turn it **Off** *(Samsung blocks USB setup while this is on)*.
-   * Go to **Settings → About phone → Software information** and tap **Build number** 7 times until it says Developer mode is enabled.
-   * Go back to **Settings → Developer options**, turn **USB debugging** **On**, plug your phone into your computer with a USB cable, and tap **Allow** on the pop-up.
-2. **Download the setup tool & app on your computer:**
-   * Download Google's free [Platform-Tools](https://developer.android.com/tools/releases/platform-tools) and unzip the folder.
-   * Download `FlipFix.apk` from the [Releases](../../releases) page and put it inside that same folder.
-3. **Install and unlock permissions:**
-   * Open a terminal / Command Prompt inside that folder and paste these three lines one by one:
-     ```bash
-     adb install FlipFix.apk
-     adb shell pm grant io.github.avengerdeveloper.flipfix android.permission.WRITE_SECURE_SETTINGS
-     adb shell cmd notification allow_listener io.github.avengerdeveloper.flipfix/io.github.avengerdeveloper.flipfix.FlipNotificationListener
-     ```
-4. **Done!**
-   * Fold your phone, wake the cover screen, and unlock — your video will keep playing.
-   * *(Recommended)* Go to **Settings → Apps → FlipFix → Battery** and pick **Unrestricted** so Samsung doesn't put it to sleep, then turn **Auto Blocker** back **On** in **Settings → Security and privacy**.
+Open the **[FlipFix setup page](https://avengerdeveloper.github.io/FlipFix/)** in **Chrome or Edge** on your computer and follow its five steps. Nothing to download and no commands to type: the page talks to your phone over the USB cable.
+
+1. **Turn Auto Blocker off:** **Settings → Security and privacy → Auto Blocker** *(Samsung blocks USB setup while it's on)*.
+2. **Turn on Developer options:** **Settings → About phone → Software information**, then tap **Build number** 7 times.
+3. **Turn on USB debugging:** **Settings → Developer options → USB debugging**.
+4. **Connect and install:** plug your phone in, click **Connect phone** on the setup page, pick your phone, and tap **Allow** on the phone. The page installs FlipFix and gives it its two permissions.
+5. **Finish on your phone:** turn USB debugging off and Auto Blocker back on, open FlipFix once, and *(recommended)* set **Settings → Apps → FlipFix → Battery** to **Unrestricted**. Then fold, wake the cover screen and unlock: your video keeps playing.
+
+Prefer the command line? See [Installation](#installation) below.
 
 ---
 
@@ -149,6 +141,8 @@ FlipFix is built to stay out of the way and keep everything strictly on-device.
 ---
 
 ### Installation
+
+The [setup page](https://avengerdeveloper.github.io/FlipFix/) does Steps 2 and 3 below from Chrome or Edge, over WebUSB: it installs the latest release and runs the same two commands. Its source is in [`site/`](site/) (`npm ci`, `npm run build`, `npm run serve` for http://localhost:8642). The steps below do the same by hand.
 
 #### Prerequisites
 * A Windows, macOS, or Linux computer with [Android SDK Platform-Tools (`adb`)](https://developer.android.com/tools/releases/platform-tools) for the one-time permission grant — **or**, with no computer, an on-phone ADB app connected through **Wireless debugging**.

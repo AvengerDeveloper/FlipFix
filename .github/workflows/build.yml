@@ -12,6 +12,7 @@ on:
 
 permissions:
   contents: write # create releases on tags
+  actions: write # start the Pages workflow after a release
 
 jobs:
   build:
@@ -68,3 +69,7 @@ jobs:
           cp app/build/outputs/apk/release/app-release.apk "$apk"
           rm -f "$FLIPFIX_KEYSTORE"
           gh release create "$GITHUB_REF_NAME" "$apk" --title "FlipFix ${GITHUB_REF_NAME}" --generate-notes
+          # Republish the setup page with this APK (Pages only works once the repository is public).
+          if [ "$(gh api "repos/$GITHUB_REPOSITORY" --jq .private)" = "false" ]; then
+            gh workflow run pages.yml --ref main
+          fi

@@ -1,0 +1,66 @@
+# Publishes the download and setup page (site/) to GitHub Pages, with the latest release's FlipFix.apk.
+#  - Runs when site/ changes on main, by hand, and after each release (the Build workflow starts it).
+#  - Skipped while the repository is private (Pages needs it public on a free plan). Once public, set
+#    Settings -> Pages -> Source to "GitHub Actions", then run this workflow once.
+name: Pages
+
+on:
+  push:
+    branches: [main]
+    paths: ['site/**', '.github/workflows/pages.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    if: ${{ !github.event.repository.private }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: site/package-lock.json
+
+      - name: Build the page
+        working-directory: site
+        run: |
+          npm ci --ignore-scripts
+          npm run build
+
+      - name: Add the latest release's APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName)"
+          gh release download "$tag" --repo "$GITHUB_REPOSITORY" --pattern FlipFix.apk --dir site/dist
+          size="$(stat -c %s site/dist/FlipFix.apk)"
+          printf '{"tag":"%s","size":%s}\n' "$tag" "$size" > site/dist/release.json
+          cat site/dist/release.json
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

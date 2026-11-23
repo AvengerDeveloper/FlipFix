@@ -12,3 +12,7 @@ probe-output/
 
 # Built or downloaded APKs (releases are published by CI)
 *.apk
+
+# Setup page: dependencies and build output (published by the Pages workflow)
+site/node_modules/
+site/dist/
