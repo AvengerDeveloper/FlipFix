@@ -325,8 +325,20 @@ function describe(e) {
   return `Something went wrong: ${message}`;
 }
 
+// The demo plays on its own unless the visitor asked for less motion: then it waits for the play button.
+function startDemo() {
+  const video = $("demo");
+  if (!video) return;
+  if (matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    video.controls = true;
+    return;
+  }
+  video.play().catch(() => { video.controls = true; });
+}
+
 function start() {
   loadRelease();
+  startDemo();
   if (!AdbDaemonWebUsbDeviceManager.BROWSER || !window.isSecureContext) {
     $("unsupported").hidden = false;
     connectButton.disabled = true;

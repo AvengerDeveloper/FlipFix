@@ -15,5 +15,5 @@ await build({
   legalComments: "eof",
   logLevel: "warning",
 });
-for (const file of ["index.html", "style.css", "icon.svg"]) await cp(`src/${file}`, `dist/${file}`);
+for (const file of ["index.html", "style.css", "icon.svg", "demo.mp4", "demo-poster.jpg", "og.png"]) await cp(`src/${file}`, `dist/${file}`);
 console.log("built dist/");

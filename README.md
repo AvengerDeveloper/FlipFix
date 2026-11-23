@@ -6,8 +6,7 @@
 
 [Install](https://avengerdeveloper.github.io/FlipFix/) · [ELI5 Version](#eli5-version) · [Nerd Stuff](#nerd-stuff) · [Contributing](#contributing) · [Disclaimer](DISCLAIMER.md)
 
-<!-- Replace the line below with a short screen recording (demo.gif) or side-by-side screenshot -->
-<!-- ![FlipFix Demo](demo.gif) -->
+<p align="center"><img src="media/demo.gif" width="640" alt="The same Galaxy Z Flip6 cover screen unlocked twice. Without FlipFix, widgets cover the video and it stops. With FlipFix, the video and clock stay and the video keeps playing."></p>
 
 ---
 
