@@ -14,6 +14,8 @@ const ONE_UI_9 = 90000; // ro.build.version.oneui: 90000 is One UI 9.0
 const CHUNK = 64 * 1024;
 /** A device list closed sooner than this was never shown. */
 const NO_LIST_MS = 300;
+const GRANT_ATTEMPTS = 3;
+const GRANT_RETRY_MS = 1500;
 
 const $ = (id) => document.getElementById(id);
 const connectButton = $("connect");
@@ -246,13 +248,22 @@ async function install(adb) {
 
 async function grant(adb) {
   task("grant", "active");
-  const grantResult = await shell(adb, `pm grant ${PACKAGE} android.permission.WRITE_SECURE_SETTINGS`);
-  const listenerResult = await shell(adb, `cmd notification allow_listener ${LISTENER}`);
-  // Read both back rather than trusting exit codes.
-  const dump = (await shell(adb, `dumpsys package ${PACKAGE}`)).out;
-  const secureOk = /android\.permission\.WRITE_SECURE_SETTINGS: granted=true/.test(dump);
-  const listeners = (await shell(adb, "settings get secure enabled_notification_listeners")).out;
-  const listenerOk = listeners.includes(`${PACKAGE}/`);
+  let grantResult, listenerResult, secureOk = false, listenerOk = false;
+  // Right after an install the phone can still be settling, and the listener doesn't always stick the first
+  // time: try a few times, reading both back rather than trusting exit codes.
+  for (let attempt = 0; attempt < GRANT_ATTEMPTS && !(secureOk && listenerOk); attempt++) {
+    if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, GRANT_RETRY_MS));
+    if (!secureOk) {
+      grantResult = await shell(adb, `pm grant ${PACKAGE} android.permission.WRITE_SECURE_SETTINGS`);
+      const dump = (await shell(adb, `dumpsys package ${PACKAGE}`)).out;
+      secureOk = /android\.permission\.WRITE_SECURE_SETTINGS: granted=true/.test(dump);
+    }
+    if (!listenerOk) {
+      listenerResult = await shell(adb, `cmd notification allow_listener ${LISTENER}`);
+      const listeners = (await shell(adb, "settings get secure enabled_notification_listeners")).out;
+      listenerOk = listeners.includes(`${PACKAGE}/`);
+    }
+  }
   if (secureOk && listenerOk) {
     task("grant", "done", "Write secure settings, notification access");
     return;
