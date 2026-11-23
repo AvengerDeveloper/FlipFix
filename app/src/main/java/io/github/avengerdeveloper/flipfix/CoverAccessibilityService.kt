@@ -388,6 +388,14 @@ class CoverAccessibilityService : AccessibilityService() {
                     Log.d(CoverState.TAG, "hiding edge strip: $pkg / $cls opened on cover")
                     edge.hide()
                 }
+                // An app opened on the unlocked cover after FlipFix was swiped away (from Samsung's widgets, its
+                // app drawer or recents): leaving it, by Back, Home or closing it, returns to the face, as it does
+                // for an app opened over the face. One UI Home's recents screen alone doesn't count, so backing out
+                // of it stays on Samsung's widgets.
+                if (CoverState.dismissed && pkg != null && pkg != ONE_UI_HOME && !keyguardManager.isKeyguardLocked) {
+                    Log.d(CoverState.TAG, "$pkg opened since the swipe-away: the face comes back after it")
+                    CoverState.dismissed = false
+                }
                 // Banking apps opened on the cover: pause FlipFix (or ask once). See BankGuard.
                 if (pkg != null) BankGuard.onAppOpenedOnCover(this, pkg)
             }
@@ -567,6 +575,8 @@ class CoverAccessibilityService : AccessibilityService() {
         const val SHADE_COLLAPSED = "com.android.systemui.subscreen.COLLAPSED"
         /** Samsung's AOD app, which also shows the cover's preset picker. */
         const val AOD_SERVICE = "com.samsung.android.app.aodservice"
+        /** One UI Home, whose recents screen also opens on the cover. */
+        const val ONE_UI_HOME = "com.sec.android.app.launcher"
         /** Wallet shows its handle within ~50 ms of Samsung's home coming forward (Flip8, Wallet 6.8.67). */
         const val WALLET_LOOK_MS = 1_500L
         /** Samsung's widgets come forward once the swipe-away's card has covered the face. */

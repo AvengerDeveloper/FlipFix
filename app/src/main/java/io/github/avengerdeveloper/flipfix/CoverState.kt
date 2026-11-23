@@ -20,7 +20,10 @@ object CoverState {
     /** True while CoverActivity is on screen. */
     @Volatile var showing = false
 
-    /** Set when the user swipes FlipFix away to reach Samsung's widgets; cleared when the screen turns off. */
+    /**
+     * Set when the user swipes FlipFix away to reach Samsung's widgets; cleared when the screen turns off, on
+     * unlock, by the edge swipe, and when an app opens on the cover (so leaving that app returns to the face).
+     */
     @Volatile var dismissed = false
         set(value) {
             if (value && !field) dismissedAt = android.os.SystemClock.uptimeMillis()
