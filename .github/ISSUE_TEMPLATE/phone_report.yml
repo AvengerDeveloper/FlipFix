@@ -1,0 +1,50 @@
+name: Phone report
+description: Tell us how FlipFix runs on your phone, especially a Z Flip5 or Z Flip7. Reports that everything works help too.
+labels: [phone report]
+body:
+  - type: input
+    id: phone
+    attributes:
+      label: Phone
+      description: Model name and number, in Settings → About phone.
+      placeholder: Galaxy Z Flip5, SM-F731B
+    validations:
+      required: true
+  - type: input
+    id: oneui
+    attributes:
+      label: One UI version
+      description: Settings → About phone → Software information.
+      placeholder: "9.0"
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: FlipFix version
+      description: Settings → Apps → FlipFix, at the bottom of the page.
+      placeholder: "0.2.0"
+    validations:
+      required: true
+  - type: checkboxes
+    id: works
+    attributes:
+      label: What works
+      description: Tick what you saw working after unlocking on the cover screen.
+      options:
+        - label: The video keeps playing
+        - label: The clock looks like Samsung's
+        - label: Notification icons and the battery
+        - label: The music player
+        - label: Swiping to the widgets and back
+        - label: FlipFix turns off when the phone is opened
+  - type: textarea
+    id: notes
+    attributes:
+      label: Anything that looks wrong
+      description: For example a missing or plainer clock, or icons in the wrong place.
+  - type: textarea
+    id: probe
+    attributes:
+      label: probe.ps1 output
+      description: Optional, and most useful when the clock is missing or plainer than Samsung's. Run tools/probe.ps1 with the phone connected and attach the file. **Check it first:** it lists device settings and apps, which can include Wi-Fi or Bluetooth device names.

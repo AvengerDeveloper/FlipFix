@@ -1,0 +1,54 @@
+name: Bug report
+description: Something in FlipFix doesn't work as it should.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. **Issues are public:** check screenshots, recordings and logs for notification previews, names, or Wi-Fi and Bluetooth device names before you attach them.
+  - type: input
+    id: phone
+    attributes:
+      label: Phone
+      description: Model name and number, in Settings → About phone.
+      placeholder: Galaxy Z Flip7, SM-F766B
+    validations:
+      required: true
+  - type: input
+    id: oneui
+    attributes:
+      label: One UI version
+      description: Settings → About phone → Software information.
+      placeholder: "9.0"
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: FlipFix version
+      description: Settings → Apps → FlipFix, at the bottom of the page.
+      placeholder: "0.2.0"
+    validations:
+      required: true
+  - type: input
+    id: clock
+    attributes:
+      label: Cover clock style
+      description: Which clock your cover screen shows, in your own words.
+      placeholder: Big stacked digits with the date above
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what you saw instead.
+      placeholder: |
+        1. Folded the phone and unlocked it on the cover screen
+        2. Expected the video to keep playing
+        3. Saw Samsung's widget screen instead
+    validations:
+      required: true
+  - type: textarea
+    id: extra
+    attributes:
+      label: Screenshots, recordings or logs
+      description: Optional. Drag files in here. tools/watch.ps1 records FlipFix's log while you try it again.

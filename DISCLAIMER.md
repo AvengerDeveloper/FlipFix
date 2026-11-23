@@ -6,7 +6,7 @@
 
 FlipFix is provided **"as is", without warranty of any kind**, under the [MIT License](LICENSE). By installing it you accept that:
 
-* You use FlipFix, and the steps needed to install it (Developer options, USB or Wireless debugging, ADB commands, turning Auto Blocker off), **entirely at your own risk**.
+* You use FlipFix, and the steps needed to install it (Developer options, USB or Wireless debugging, the setup page or ADB commands, turning Auto Blocker off), **entirely at your own risk**.
 * The author and contributors are **not responsible** for any damage or problem that comes from installing, using or removing FlipFix, including but not limited to: data loss, battery drain or overheating, a cover screen that behaves wrongly or stops responding, missed notifications or alarms, problems with banking or other apps, lost settings, or any warranty, support or account issue with Samsung, Google or your carrier.
 * FlipFix is an independent project. It is **not made, endorsed or supported by Samsung**. Don't contact Samsung support about problems FlipFix causes; uninstall it first.
 

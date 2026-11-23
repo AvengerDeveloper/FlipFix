@@ -4,7 +4,7 @@
 
 > **Experimental test software.** FlipFix is new, was built and tested by one developer on two phones, and relies on undocumented Samsung behaviour. Expect bugs, and use it at your own risk: read the [disclaimer](DISCLAIMER.md) before installing.
 
-[ELI5 Version](#eli5-version) · [Nerd Stuff](#nerd-stuff) · [Disclaimer](DISCLAIMER.md)
+[Install](https://avengerdeveloper.github.io/FlipFix/) · [ELI5 Version](#eli5-version) · [Nerd Stuff](#nerd-stuff) · [Contributing](#contributing) · [Disclaimer](DISCLAIMER.md)
 
 <!-- Replace the line below with a short screen recording (demo.gif) or side-by-side screenshot -->
 <!-- ![FlipFix Demo](demo.gif) -->
@@ -23,6 +23,8 @@ Samsung's One UI 9 update changed the cover screen on the Galaxy Z Flip. Now, th
 * **Your notifications and music controls** stay in their exact spots, and so does **your clock**: an exact copy for the clock styles FlipFix recognises, and a plainer clock in the same spot for the others.
 * **Swipe left or right** to see your Samsung widgets; **swipe back** to return to your video.
 * **Made for cover screens without widgets.** If your cover style has widgets under the clock, FlipFix shows each one in its spot and shape as a frosted glass pane with your video moving behind it, the widget blurred and not tappable: showing them live would need permissions (health, alarms, usage) that FlipFix doesn't ask for. The real ones are a swipe away.
+* **Swipe up** for Samsung Wallet's quick-pay cards, as before, if you use them.
+* **Use apps on the cover screen** as usual: when you leave one (Back, Home, or closing it), you're back on your video.
 * **Swipe down from the top** for your normal notifications and quick settings.
 * **Open your phone** and FlipFix turns itself off automatically.
 
@@ -30,17 +32,20 @@ Samsung's One UI 9 update changed the cover screen on the Galaxy Z Flip. Now, th
 * **100% offline:** FlipFix has no internet access, so nothing ever leaves your phone.
 * **Private:** Nothing is sent, and no snapshot or notification is ever saved: FlipFix remembers only its settings, your banking-app choices and where each clock sits. FlipFix looks at your notifications only to show their icons and your music player, and the quick snapshots it takes of the cover screen (for the swipe animations and to recognise your cover style) stay in memory and are thrown away. The one thing kept is a heavily blurred copy of the text and icons of any widgets under your clock, too blurry to read, in memory only, to draw their placeholders.
 * **Banking-friendly:** Because FlipFix turns itself off the moment you unfold your phone, banking apps work normally without complaining.
+* **The setup page only installs FlipFix:** it runs in your browser and talks to your phone only over the USB cable. You watch it do four things: connect, check the phone, install FlipFix and give it its two permissions.
 
 ### How to install (about 5 minutes)
-Because Android blocks normal apps from changing how the cover screen behaves, you need to plug your phone into a computer **once** to give FlipFix permission. After that, you never need the computer again.
+Because Android blocks normal apps from changing how the cover screen behaves, you need to plug your phone into a computer **once** to give FlipFix permission. After that, you only need the computer again to update FlipFix.
 
 Open the **[FlipFix setup page](https://avengerdeveloper.github.io/FlipFix/)** in **Chrome or Edge** on your computer and follow its five steps. Nothing to download and no commands to type: the page talks to your phone over the USB cable.
 
 1. **Turn Auto Blocker off:** **Settings → Security and privacy → Auto Blocker** *(Samsung blocks USB setup while it's on)*.
 2. **Turn on Developer options:** **Settings → About phone → Software information**, then tap **Build number** 7 times.
 3. **Turn on USB debugging:** **Settings → Developer options → USB debugging**.
-4. **Connect and install:** plug your phone in, click **Connect phone** on the setup page, pick your phone, and tap **Allow** on the phone. The page installs FlipFix and gives it its two permissions.
+4. **Connect and install:** with your phone open and unlocked, plug it in, click **Connect phone** on the setup page, pick your phone, and tap **Allow** on the phone. The page checks it's a Z Flip on One UI 9, installs FlipFix and gives it its two permissions.
 5. **Finish on your phone:** turn USB debugging off and Auto Blocker back on, open FlipFix once, and *(recommended)* set **Settings → Apps → FlipFix → Battery** to **Unrestricted**. Then fold, wake the cover screen and unlock: your video keeps playing.
+
+Something not working? The page's **If something goes wrong** section covers the usual problems. **To update** later, open the page and do steps 1 to 4 again: it installs the new version over the old one, and FlipFix keeps its settings.
 
 Prefer the command line? See [Installation](#installation) below.
 
@@ -56,7 +61,7 @@ Prefer the command line? See [Installation](#installation) below.
 | **Galaxy Z Flip8** | `SM-F776B` (One UI 9.0 / Android 17) | Tested daily — clock, icons, battery pill & music pill match within a few pixels |
 | **Galaxy Z Flip5 / Z Flip7** | One UI 9.0+ | Not tested yet; should work the same way — reports welcome |
 
-> **Using a Z Flip5 or Z Flip7?** If your cover video stays active after unlock but the clock is missing or plainer than Samsung's, run `tools/probe.ps1` (see [Troubleshooting](#troubleshooting--diagnostic-tools)) and open a GitHub Issue with the output so support for your clock layout can be added. **Check the output before posting**: it includes device settings and app lists that can contain things like Wi-Fi or Bluetooth device names.
+> **Using a Z Flip5 or Z Flip7?** If your cover video stays active after unlock but the clock is missing or plainer than Samsung's, run `tools/probe.ps1` (see [Troubleshooting](#troubleshooting--diagnostic-tools)) and open a [Phone report](https://github.com/AvengerDeveloper/FlipFix/issues/new?template=phone_report.yml) with the output so support for your clock layout can be added. **Check the output before posting**: it includes device settings and app lists that can contain things like Wi-Fi or Bluetooth device names.
 
 ---
 
@@ -142,10 +147,22 @@ FlipFix is built to stay out of the way and keep everything strictly on-device.
 
 ### Installation
 
-The [setup page](https://avengerdeveloper.github.io/FlipFix/) does Steps 2 and 3 below from Chrome or Edge, over WebUSB: it installs the latest release and runs the same two commands. Its source is in [`site/`](site/) (`npm ci`, `npm run build`, `npm run serve` for http://localhost:8642). The steps below do the same by hand.
+There are two ways: the setup page, or `adb` by hand (Steps 1 to 5 below). Both install the same release APK and give it the same two permissions.
+
+#### The Setup Page
+
+The [setup page](https://avengerdeveloper.github.io/FlipFix/) does Steps 2 and 3 from Chrome or Edge on a computer, with [WebUSB](https://developer.mozilla.org/docs/Web/API/WebUSB_API) and [Tango ADB](https://github.com/yume-chan/ya-webadb), an ADB client written in JavaScript. Nothing is installed on the computer, and the page talks only to the phone, over the USB cable. After you click **Connect phone** and pick the phone, it:
+
+1. **Connects:** the browser makes an ADB key for the page (kept in the browser's storage), and the phone asks *Allow USB debugging?* for it, as it does for `adb`.
+2. **Checks the phone:** reads `ro.product.model`, `ro.build.version.oneui` and the SDK level. It stops below Android 13, and warns (with an **Install anyway** choice) on a phone that isn't an `SM-F7…` model or runs One UI older than 9.
+3. **Installs:** streams the latest release's `FlipFix.apk` to `pm install`, unless the same or a newer version is already there. If a copy signed with another key is installed (`INSTALL_FAILED_UPDATE_INCOMPATIBLE`), it removes that copy only if you choose to.
+4. **Grants:** runs the two commands from Step 3, reads both permissions back (`dumpsys package` and `enabled_notification_listeners`), and retries for a few seconds while the phone settles after the install.
+
+`.github/workflows/pages.yml` builds the page from [`site/`](site/) and copies the latest release's `FlipFix.apk` next to it, because a page can't download release files from github.com itself; each new release publishes the page again. To run it locally: `cd site`, `npm ci`, `npm run build`, put an APK at `site/dist/FlipFix.apk`, `npm run serve`, then open http://localhost:8642 (WebUSB only works on `localhost` or HTTPS). Tested on Windows 11 in Chrome and Edge; macOS, Linux and ChromeOS should work but haven't been tried. Firefox, Safari and phone browsers have no WebUSB.
 
 #### Prerequisites
-* A Windows, macOS, or Linux computer with [Android SDK Platform-Tools (`adb`)](https://developer.android.com/tools/releases/platform-tools) for the one-time permission grant — **or**, with no computer, an on-phone ADB app connected through **Wireless debugging**.
+* For the setup page: a computer with Chrome or Edge, and a USB cable that carries data.
+* For the steps by hand: a Windows, macOS, or Linux computer with [Android SDK Platform-Tools (`adb`)](https://developer.android.com/tools/releases/platform-tools) for the one-time permission grant — **or**, with no computer, an on-phone ADB app connected through **Wireless debugging**.
 * *(Optional, only if building from source)* Android Studio or JDK 21.
 
 #### Step 1: Enable USB Debugging on Your Z Flip
@@ -156,7 +173,7 @@ The [setup page](https://avengerdeveloper.github.io/FlipFix/) does Steps 2 and 3
 #### Step 2: Install FlipFix
 
 **Option A — Install prebuilt APK (Recommended):**
-Download [`FlipFix.apk`](../../releases/latest/download/FlipFix.apk) from the latest [release](../../releases) and install it via ADB (installing through ADB automatically avoids Android's *"Restricted settings"* block):
+Download [`FlipFix.apk`](https://github.com/AvengerDeveloper/FlipFix/releases/latest/download/FlipFix.apk) from the latest [release](https://github.com/AvengerDeveloper/FlipFix/releases) and install it via ADB (installing through ADB automatically avoids Android's *"Restricted settings"* block):
 ```bash
 adb install FlipFix.apk
 ```
@@ -191,6 +208,8 @@ Open the **FlipFix** app on your main screen anytime to check service status, co
 
 ### Troubleshooting & Diagnostic Tools
 
+Install problems (phone not in the browser's list, *busy*, no *Allow USB debugging?* prompt) are covered on the setup page under [If something goes wrong](https://avengerdeveloper.github.io/FlipFix/#help).
+
 The [`tools/`](tools/) folder includes Windows PowerShell scripts to inspect how One UI handles the cover display on your firmware. They only read from your phone, apart from clearing its log buffer before recording, briefly storing a screenshot there (deleted straight after), and `run-covertest.ps1` opening its test app:
 
 | Script | Purpose |
@@ -200,6 +219,14 @@ The [`tools/`](tools/) folder includes Windows PowerShell scripts to inspect how
 | `tools/probe.ps1` | Dumps read-only display, window, wallpaper, and package information from your device (attach when reporting Flip 5/7 issues — check it first) |
 | `tools/capture-unlock.ps1` | Records the phone's log while you unlock and runs `probe.ps1` before and after, to help diagnose firmware-specific timing issues |
 | `tools/run-covertest.ps1` | Opens a separate test app on the cover screen after unlock, to check whether Samsung's cover video can be paused and resumed on your firmware. Install the app first from the [`covertest/`](covertest/) module (`./gradlew :covertest:installDebug`) |
+
+---
+
+### Contributing
+
+Bug reports, phone reports and pull requests are all welcome. Reports from a Z Flip5 or Z Flip7 help most, even when everything works: use the forms on the [Issues](https://github.com/AvengerDeveloper/FlipFix/issues/new/choose) page.
+
+To send a change, **fork** the repository, make a **branch** for your change, push it to your fork and open a **pull request** into `main`. GitHub builds a debug APK for every pull request so others can try it. [CONTRIBUTING.md](CONTRIBUTING.md) walks through each step with the commands, which changes fit FlipFix (offline, no new permissions or libraries), and how to test on a phone.
 
 ---
 

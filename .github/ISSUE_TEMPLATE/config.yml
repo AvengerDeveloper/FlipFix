@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Install help
+    url: https://avengerdeveloper.github.io/FlipFix/#help
+    about: The setup page's "If something goes wrong" section covers the usual install problems.
